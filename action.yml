@@ -1,0 +1,43 @@
+name: AI Reviewer
+description: Ask for a review on a PR and get a normal GitHub review back, inline comments and all
+author: azogoat
+inputs:
+  model:
+    description: Model id string, claude-* (Anthropic) or gpt-*/o* (OpenAI)
+    default: claude-opus-4-8
+  max_tool_calls:
+    description: Cap on exploration tool calls; a runaway guard, not a depth limit
+    default: "50"
+  exploration_token_budget:
+    description: Optional cap on total tokens across exploration steps
+    default: ""
+  max_inline_comments:
+    description: Maximum inline review comments; the rest go into the review body
+    default: "15"
+  inline_severity_threshold:
+    description: Minimum severity posted inline (critical, major, minor); nits never post inline
+    default: minor
+  request_changes_threshold:
+    description: Minimum severity that turns the verdict into REQUEST_CHANGES
+    default: major
+  reviewer_login:
+    description: Machine user login that must be the requested reviewer in team mode
+    default: light-ai-reviewer
+  pull_number:
+    description: PR number, only needed for workflow_dispatch runs
+    default: ""
+  dry_run:
+    description: Log the would-be review instead of posting it
+    default: "false"
+  github_token:
+    description: Token used to read the PR and submit the review
+    required: true
+  anthropic_api_key:
+    description: Anthropic API key, required for claude-* models
+    default: ""
+  openai_api_key:
+    description: OpenAI API key, required for gpt-*/o* models
+    default: ""
+runs:
+  using: node20
+  main: dist/main.mjs

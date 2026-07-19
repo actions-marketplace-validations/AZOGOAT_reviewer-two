@@ -1,0 +1,70 @@
+name: AI review
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        type: string
+        default: claude-opus-4-8
+      reviewer_login:
+        type: string
+        default: light-ai-reviewer
+      max_tool_calls:
+        type: string
+        default: "50"
+      max_inline_comments:
+        type: string
+        default: "15"
+      inline_severity_threshold:
+        type: string
+        default: minor
+      request_changes_threshold:
+        type: string
+        default: major
+      dry_run:
+        type: string
+        default: "false"
+      timeout_minutes:
+        type: number
+        default: 15
+    secrets:
+      ai_reviewer_token:
+        required: true
+      anthropic_api_key:
+        required: false
+      openai_api_key:
+        required: false
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Deliberately narrow: only the review_requested action for this machine user
+    # triggers a run, so other pull_request event types (opened, synchronize,
+    # labeled, etc.) no-op instead of posting a review nobody asked for.
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.action == 'review_requested' &&
+      github.event.requested_reviewer.login == inputs.reviewer_login
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: azogoat/ai-reviewer@v1
+        with:
+          model: ${{ inputs.model }}
+          reviewer_login: ${{ inputs.reviewer_login }}
+          max_tool_calls: ${{ inputs.max_tool_calls }}
+          max_inline_comments: ${{ inputs.max_inline_comments }}
+          inline_severity_threshold: ${{ inputs.inline_severity_threshold }}
+          request_changes_threshold: ${{ inputs.request_changes_threshold }}
+          dry_run: ${{ inputs.dry_run }}
+          github_token: ${{ secrets.ai_reviewer_token }}
+          anthropic_api_key: ${{ secrets.anthropic_api_key }}
+          openai_api_key: ${{ secrets.openai_api_key }}
