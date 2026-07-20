@@ -52,14 +52,12 @@ export async function runStructured<T>(
 ): Promise<{ output: T; toolCalls: number }> {
   const result = await generateText({
     model: resolveModel(opts.modelId),
-    messages: [
-      {
-        role: "system",
-        content: opts.system,
-        providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
-      },
-      { role: "user", content: opts.prompt },
-    ],
+    instructions: {
+      role: "system",
+      content: opts.system,
+      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+    },
+    messages: [{ role: "user", content: opts.prompt }],
     tools: opts.tools,
     // step count approximates tool calls; a step may batch parallel calls
     stopWhen: [

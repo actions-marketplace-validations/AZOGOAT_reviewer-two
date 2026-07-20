@@ -1,3 +1,5 @@
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 import {
@@ -160,7 +162,9 @@ export async function run(): Promise<void> {
     pullNumber,
   };
   const workspace = process.env.GITHUB_WORKSPACE ?? process.cwd();
-  const actionRoot = process.env.GITHUB_ACTION_PATH ?? workspace;
+  const actionRoot =
+    process.env.GITHUB_ACTION_PATH ??
+    join(dirname(fileURLToPath(import.meta.url)), "..");
 
   try {
     const pr = await gatherPr(octokit, ref);

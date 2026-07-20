@@ -29494,6 +29494,10 @@ var require_dist3 = __commonJS({
   }
 });
 
+// src/main.ts
+import { dirname, join as join3 } from "path";
+import { fileURLToPath } from "url";
+
 // node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/command.js
 import * as os from "os";
 
@@ -79823,14 +79827,12 @@ function exceedsTokenBudget(budget) {
 async function runStructured(opts) {
   const result = await generateText({
     model: resolveModel(opts.modelId),
-    messages: [
-      {
-        role: "system",
-        content: opts.system,
-        providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } }
-      },
-      { role: "user", content: opts.prompt }
-    ],
+    instructions: {
+      role: "system",
+      content: opts.system,
+      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } }
+    },
+    messages: [{ role: "user", content: opts.prompt }],
     tools: opts.tools,
     // step count approximates tool calls; a step may batch parallel calls
     stopWhen: [
@@ -80367,7 +80369,7 @@ async function run() {
     pullNumber
   };
   const workspace = process.env.GITHUB_WORKSPACE ?? process.cwd();
-  const actionRoot = process.env.GITHUB_ACTION_PATH ?? workspace;
+  const actionRoot = process.env.GITHUB_ACTION_PATH ?? join3(dirname(fileURLToPath(import.meta.url)), "..");
   try {
     const pr = await gatherPr(octokit, ref);
     const rules = loadRules(workspace, pr.changedPaths);
