@@ -41,9 +41,6 @@ concurrency:
 
 jobs:
   review:
-    # Deliberately narrow: only the review_requested action for this machine user
-    # triggers a run, so other pull_request event types (opened, synchronize,
-    # labeled, etc.) no-op instead of posting a review nobody asked for.
     if: >-
       github.event.pull_request.draft == false &&
       github.event.action == 'review_requested' &&

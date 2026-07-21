@@ -9,6 +9,7 @@ import {
   type PrRef,
 } from "./context.js";
 import { makeExploreTools } from "./explore.js";
+import { fetchLinkedIssues, parseIssueRefs } from "./issues.js";
 import { runStructured } from "./model.js";
 import {
   buildReviewPrompt,
@@ -173,6 +174,12 @@ export async function run(): Promise<void> {
       inputs.reviewerLogin,
       "github-actions[bot]",
     ]);
+    const linkedIssues = await fetchLinkedIssues(
+      octokit,
+      parseIssueRefs(pr.meta.body, ref.owner, ref.repo),
+    );
+    if (linkedIssues.length > 0)
+      core.info(`Linked issues: ${linkedIssues.length} fetched for context`);
 
     const system = buildSystemPrompt(
       loadBasePrompt(actionRoot),
@@ -192,6 +199,7 @@ export async function run(): Promise<void> {
         files: pr.files,
         skippedFiles: pr.skippedFiles,
         previous,
+        linkedIssues,
       }),
       schema: reviewOutputSchema,
       tools,

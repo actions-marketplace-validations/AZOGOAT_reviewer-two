@@ -27,6 +27,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      issues: read
     steps:
       - name: Validate PR number
         if: github.event_name == 'workflow_dispatch'
@@ -50,7 +51,7 @@ Set the `ANTHROPIC_API_KEY` secret, then add the `ai-review` label to any PR. Th
 ## Team mode (machine user)
 
 1. Create a dedicated GitHub account (for example `light-ai-reviewer`) and add it to the org or repo as a collaborator.
-2. Create a fine-grained PAT for it with Contents: read and Pull requests: read and write. Store it as the `AI_REVIEWER_TOKEN` secret.
+2. Create a fine-grained PAT for it with Contents: read and Pull requests: read and write. Add Issues: read if you want the reviewer to read issues linked in PR descriptions (`#123` or issue URLs) as review context. Store it as the `AI_REVIEWER_TOKEN` secret.
 3. Add `.github/workflows/ai-review.yml`:
 
 ```yaml
@@ -71,6 +72,8 @@ Now requesting a review from the machine user triggers a review under its identi
 ## Configuration (optional)
 
 Zero config works: the reviewer auto-detects README.md, AGENTS.md, CLAUDE.md, CONTRIBUTING.md, and .cursor/rules as context.
+
+Issues referenced in the PR description (`#123`, `owner/repo#123`, or full issue URLs) are fetched, with their comment threads, and given to the reviewer as context. Refs the token cannot read are skipped.
 
 For full control add `.github/ai-review/manifest.yml`:
 
