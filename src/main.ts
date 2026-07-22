@@ -21,6 +21,7 @@ import { dedupeAgainstPrevious, planReview, submitReview } from "./review.js";
 import { loadRules } from "./rules.js";
 import { reviewOutputSchema, type Severity, severities } from "./schema.js";
 import { verifyFindings } from "./verify.js";
+import { fetchReferencedWorkflows, parseWorkflowRefs } from "./workflows.js";
 
 export interface Inputs {
   model: string;
@@ -180,6 +181,14 @@ export async function run(): Promise<void> {
     );
     if (linkedIssues.length > 0)
       core.info(`Linked issues: ${linkedIssues.length} fetched for context`);
+    const referencedWorkflows = await fetchReferencedWorkflows(
+      octokit,
+      parseWorkflowRefs(pr.files),
+    );
+    if (referencedWorkflows.length > 0)
+      core.info(
+        `Referenced workflows: ${referencedWorkflows.length} fetched for context`,
+      );
 
     const system = buildSystemPrompt(
       loadBasePrompt(actionRoot),
@@ -200,6 +209,7 @@ export async function run(): Promise<void> {
         skippedFiles: pr.skippedFiles,
         previous,
         linkedIssues,
+        referencedWorkflows,
       }),
       schema: reviewOutputSchema,
       tools,
