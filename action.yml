@@ -1,6 +1,9 @@
-name: AI Reviewer
-description: Ask for a review on a PR and get a normal GitHub review back, inline comments and all
+name: Reviewer Two
+description: Ask for a review on a PR and get a normal GitHub review back, inline comments and all. It never approves.
 author: azogoat
+branding:
+  icon: user-check
+  color: red
 inputs:
   model:
     description: Model id string, claude-* (Anthropic) or gpt-*/o* (OpenAI)
@@ -21,8 +24,8 @@ inputs:
     description: Minimum severity that turns the verdict into REQUEST_CHANGES
     default: major
   reviewer_login:
-    description: Machine user login that must be the requested reviewer in team mode
-    default: light-ai-reviewer
+    description: Login of the machine account your team created; required for review_requested triggers
+    default: ""
   pull_number:
     description: PR number, only needed for workflow_dispatch runs
     default: ""

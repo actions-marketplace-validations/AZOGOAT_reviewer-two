@@ -1,12 +1,18 @@
-# ai-reviewer
+# Reviewer Two
 
-AI code review for pull requests. You ask for a review the same way you'd ask a teammate, and what comes back is an ordinary GitHub review: inline comments, one-click suggestions where they help, and a COMMENT or REQUEST_CHANGES verdict. Under the hood it reads through the repo first, then re-checks every finding before posting, so it leans toward fewer, better comments. It never approves, and it cannot touch your code: the token only has contents read and pull-requests write.
+A GitHub Action that reviews pull requests and posts the result as a normal GitHub review: inline comments, suggestion blocks where the fix is obvious, and a COMMENT or REQUEST_CHANGES verdict. It never approves, and it cannot touch your code: the token only gets contents read and pull-requests write.
 
-Works with any language. Rules and conventions come from your repository, not from the tool.
+Before commenting it explores the repo with read-only tools, then re-checks every finding and drops the ones it cannot defend. The bias is fewer, better comments: nits fold into the review body instead of inline noise, anything a linter would catch is skipped, and each finding cites the rule it breaks.
 
-## Quick start (solo, any repo)
+Works with any language. Conventions come from your repo, not the tool.
 
-Add `.github/workflows/ai-review.yml`:
+## Setup
+
+Two ways to run it.
+
+### Label trigger (solo)
+
+Reviews post as github-actions. Add `.github/workflows/ai-review.yml`:
 
 ```yaml
 name: AI review
@@ -37,22 +43,23 @@ jobs:
           [[ "$PULL_NUMBER" =~ ^[0-9]+$ ]] || { echo "pull_number must be numeric"; exit 1; }
       - uses: actions/checkout@v4
         with:
-          # Works for both label and manual dispatch runs
           ref: refs/pull/${{ inputs.pull_number || github.event.pull_request.number }}/head
-      - uses: azogoat/ai-reviewer@v1
+      - uses: azogoat/reviewer-two@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           pull_number: ${{ inputs.pull_number || github.event.pull_request.number }}
 ```
 
-Set the `ANTHROPIC_API_KEY` secret, then add the `ai-review` label to any PR. The review posts as github-actions.
+Set the `ANTHROPIC_API_KEY` secret. Then label a PR with `ai-review`, or run the workflow manually with a PR number.
 
-## Team mode (machine user)
+### Review request trigger (team)
 
-1. Create a dedicated GitHub account (for example `light-ai-reviewer`) and add it to the org or repo as a collaborator.
-2. Create a fine-grained PAT for it with Contents: read and Pull requests: read and write. Add Issues: read if you want the reviewer to read issues linked in PR descriptions (`#123` or issue URLs) as review context. Store it as the `AI_REVIEWER_TOKEN` secret.
-3. Add `.github/workflows/ai-review.yml`:
+Reviews post from a machine account that your team creates and owns, so you request and re-request it exactly like a human reviewer.
+
+1. Create a machine GitHub account under any name you like, and add it to the repo as a collaborator.
+2. Give it a fine-grained PAT with Contents: read and Pull requests: read and write. Add Issues: read if you want issues linked in PR descriptions used as context. Store it as the `AI_REVIEWER_TOKEN` secret.
+3. Add `.github/workflows/ai-review.yml`, with `reviewer_login` set to your account's login:
 
 ```yaml
 name: AI review
@@ -61,21 +68,21 @@ on:
     types: [review_requested]
 jobs:
   review:
-    uses: azogoat/ai-reviewer/.github/workflows/review.yml@v1
+    uses: azogoat/reviewer-two/.github/workflows/review.yml@v1
+    with:
+      reviewer_login: your-review-bot
     secrets:
       ai_reviewer_token: ${{ secrets.AI_REVIEWER_TOKEN }}
       anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-Now requesting a review from the machine user triggers a review under its identity. Re-requesting triggers a fresh incremental review that only raises new or unresolved issues.
+Requesting a review from that account triggers a run under its identity. Re-requesting runs an incremental pass that only raises new or unresolved issues. Draft PRs are skipped.
 
-## Configuration (optional)
+## Rules and context
 
-Zero config works: the reviewer auto-detects README.md, AGENTS.md, CLAUDE.md, CONTRIBUTING.md, and .cursor/rules as context.
+Zero config works: README.md, AGENTS.md, CLAUDE.md, CONTRIBUTING.md, and .cursor/rules are picked up automatically. Issues referenced in the PR description (`#123`, `owner/repo#123`, or full URLs) are fetched with their comment threads; refs the token cannot read are skipped.
 
-Issues referenced in the PR description (`#123`, `owner/repo#123`, or full issue URLs) are fetched, with their comment threads, and given to the reviewer as context. Refs the token cannot read are skipped.
-
-For full control add `.github/ai-review/manifest.yml`:
+For per-path rules, add `.github/ai-review/manifest.yml`:
 
 ```yaml
 context: description.md
@@ -92,16 +99,16 @@ Only rule files matching the PR's changed paths are loaded.
 | Input | Default | Purpose |
 | --- | --- | --- |
 | model | claude-opus-4-8 | Any claude-* or gpt-*/o* model id |
-| max_tool_calls | 50 | Exploration cap (runaway guard, raise freely for large repos) |
+| max_tool_calls | 50 | Exploration cap; a runaway guard, raise it for large repos |
 | exploration_token_budget | unset | Optional total token cap across exploration |
-| max_inline_comments | 15 | Rest of the findings collapse into the review body |
+| max_inline_comments | 15 | Extra findings collapse into the review body |
 | inline_severity_threshold | minor | Minimum severity posted inline; nits never post inline |
 | request_changes_threshold | major | Minimum severity for a REQUEST_CHANGES verdict |
-| reviewer_login | light-ai-reviewer | Machine user guard in team mode |
-| dry_run | false | Log the review instead of posting |
+| reviewer_login | unset | Login of your machine account; required for team mode |
+| dry_run | false | Log the review instead of posting it |
 
-Note: the remaining inputs (github_token, anthropic_api_key, openai_api_key, pull_number) appear in the examples above and are documented in action.yml.
+`github_token`, `anthropic_api_key`, `openai_api_key`, and `pull_number` appear in the examples above; see [action.yml](action.yml) for details.
 
-## Cost and model notes
+## Model and cost
 
-Default is the strongest Claude model because review quality is the product; a deep review of a mid-size PR lands around 1 to 3 USD. Any repo can set a cheaper model. Switching to a GPT model is just the model input plus an `openai_api_key` secret; there are no separate code paths.
+The default is the strongest Claude model because review quality is the whole point; a deep review of a mid-size PR lands around 1 to 3 USD. Any repo can set a cheaper `model`. GPT models need only the model id and an `openai_api_key` secret; there are no separate code paths.

@@ -80459,7 +80459,7 @@ function readInputs() {
       "request_changes_threshold",
       "major"
     ),
-    reviewerLogin: getInput("reviewer_login") || "light-ai-reviewer",
+    reviewerLogin: getInput("reviewer_login"),
     dryRun: getInput("dry_run") === "true"
   };
 }
@@ -80468,6 +80468,9 @@ function shouldSkip(payload, inputs, eventName) {
     return "PR is a draft; request a review again when it is ready";
   }
   if (payload.action === "review_requested" && payload.requested_reviewer?.login !== void 0) {
+    if (!inputs.reviewerLogin) {
+      return "reviewer_login is not set; set it to your machine account login to enable review_requested triggers";
+    }
     const login = payload.requested_reviewer.login;
     if (login !== inputs.reviewerLogin) {
       return `review requested from ${login}, not from ${inputs.reviewerLogin}`;

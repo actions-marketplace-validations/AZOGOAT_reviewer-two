@@ -82,7 +82,7 @@ export function readInputs(): Inputs {
       "request_changes_threshold",
       "major",
     ),
-    reviewerLogin: core.getInput("reviewer_login") || "light-ai-reviewer",
+    reviewerLogin: core.getInput("reviewer_login"),
     dryRun: core.getInput("dry_run") === "true",
   };
 }
@@ -106,6 +106,9 @@ export function shouldSkip(
     payload.action === "review_requested" &&
     payload.requested_reviewer?.login !== undefined
   ) {
+    if (!inputs.reviewerLogin) {
+      return "reviewer_login is not set; set it to your machine account login to enable review_requested triggers";
+    }
     const login = payload.requested_reviewer.login;
     if (login !== inputs.reviewerLogin) {
       return `review requested from ${login}, not from ${inputs.reviewerLogin}`;
