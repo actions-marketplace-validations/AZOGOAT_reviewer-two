@@ -33955,17 +33955,12 @@ var excludeMatcher = (0, import_picomatch.default)(DEFAULT_EXCLUDES, {
   dot: true,
   basename: false
 });
-var rootExcludeMatcher = (0, import_picomatch.default)(
-  DEFAULT_EXCLUDES.map((g) => g.replace(/^\*\*\//, "")),
-  { dot: true }
-);
 function isExcluded(path2) {
-  return excludeMatcher(path2) || rootExcludeMatcher(path2);
+  return excludeMatcher(path2);
 }
 function parseDiff(diff) {
   const files = [];
   let current = null;
-  let newLine = 0;
   let inHunk = false;
   const lines = diff.split("\n");
   if (lines.at(-1) === "") lines.pop();
@@ -33980,11 +33975,7 @@ function parseDiff(diff) {
       if (raw === "/dev/null") {
         current = null;
       } else {
-        current = {
-          path: raw.replace(/^b\//, ""),
-          patch: "",
-          commentableLines: /* @__PURE__ */ new Set()
-        };
+        current = { path: raw.replace(/^b\//, ""), patch: "" };
         files.push(current);
       }
       continue;
@@ -33992,18 +33983,13 @@ function parseDiff(diff) {
     if (!current) continue;
     current.patch += `${line}
 `;
-    if (line.startsWith("@@")) {
-      inHunk = true;
-      const m = /\+(\d+)/.exec(line);
-      newLine = m ? Number(m[1]) : 0;
-      continue;
-    }
-    if (line.startsWith("+") || line.startsWith(" ") || line === "") {
-      if (newLine > 0) current.commentableLines.add(newLine);
-      newLine++;
-    }
+    if (line.startsWith("@@")) inHunk = true;
   }
-  return files;
+  return files.map((f) => ({
+    ...f,
+    // drop the trailing newline; an empty tail would count as a context line
+    commentableLines: commentableLinesFromPatch(f.patch.replace(/\n$/, ""))
+  }));
 }
 function commentableLinesFromPatch(patch) {
   const commentable = /* @__PURE__ */ new Set();
@@ -34058,7 +34044,6 @@ async function gatherPr(octokit, ref) {
     per_page: 100
   });
   let allFiles;
-  const omitted = [];
   try {
     const diffResponse = await octokit.request(
       "GET /repos/{owner}/{repo}/pulls/{pull_number}",
@@ -34073,9 +34058,11 @@ async function gatherPr(octokit, ref) {
   } catch (err) {
     if (err.status !== 406) throw err;
     allFiles = filesFromListFiles(prFiles);
-    for (const f of prFiles)
-      if (!f.patch && !isExcluded(f.filename)) omitted.push(f.filename);
   }
+  const present = new Set(allFiles.map((f) => f.path));
+  const omitted = prFiles.filter(
+    (f) => !f.patch && !present.has(f.filename) && !isExcluded(f.filename)
+  ).map((f) => f.filename);
   const reviewable = allFiles.filter((f) => !isExcluded(f.path));
   const { files, skipped } = degradeIfOversized(reviewable);
   return {

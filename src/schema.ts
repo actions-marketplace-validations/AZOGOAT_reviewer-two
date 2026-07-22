@@ -49,4 +49,3 @@ export const verificationSchema = z.object({
       "Corrected severity when the evidence shows the impact differs from what was stated",
     ),
 });
-export type Verification = z.infer<typeof verificationSchema>;

@@ -51,19 +51,15 @@ const DEFAULT_EXCLUDES = [
   "**/yarn.lock",
 ];
 
+// "**/" matches zero directories, so root-level lockfiles match too
 const excludeMatcher = picomatch(DEFAULT_EXCLUDES, {
   dot: true,
   basename: false,
 });
-// basename matching so bare "poetry.lock" at repo root also matches the ** patterns
-const rootExcludeMatcher = picomatch(
-  DEFAULT_EXCLUDES.map((g) => g.replace(/^\*\*\//, "")),
-  { dot: true },
-);
 
 /** True for lockfiles and generated paths that must never enter review content. */
 export function isExcluded(path: string): boolean {
-  return excludeMatcher(path) || rootExcludeMatcher(path);
+  return excludeMatcher(path);
 }
 
 /**
@@ -71,9 +67,8 @@ export function isExcluded(path: string): boolean {
  * new-side line numbers present in hunks; GitHub inline comments only anchor there.
  */
 export function parseDiff(diff: string): FileDiff[] {
-  const files: FileDiff[] = [];
-  let current: FileDiff | null = null;
-  let newLine = 0;
+  const files: { path: string; patch: string }[] = [];
+  let current: { path: string; patch: string } | null = null;
   // a "+++ " header is only expected before the first "@@" of a file; once
   // inside a hunk body, a line that happens to start with "+++ " is content
   // (e.g. an added line of "++ x"), not a phantom next file.
@@ -92,30 +87,20 @@ export function parseDiff(diff: string): FileDiff[] {
       if (raw === "/dev/null") {
         current = null;
       } else {
-        current = {
-          path: raw.replace(/^b\//, ""),
-          patch: "",
-          commentableLines: new Set(),
-        };
+        current = { path: raw.replace(/^b\//, ""), patch: "" };
         files.push(current);
       }
       continue;
     }
     if (!current) continue;
     current.patch += `${line}\n`;
-    if (line.startsWith("@@")) {
-      inHunk = true;
-      const m = /\+(\d+)/.exec(line);
-      newLine = m ? Number(m[1]) : 0;
-      continue;
-    }
-    if (line.startsWith("+") || line.startsWith(" ") || line === "") {
-      if (newLine > 0) current.commentableLines.add(newLine);
-      newLine++;
-    }
-    // removed-side lines do not advance the new-side counter
+    if (line.startsWith("@@")) inHunk = true;
   }
-  return files;
+  return files.map((f) => ({
+    ...f,
+    // drop the trailing newline; an empty tail would count as a context line
+    commentableLines: commentableLinesFromPatch(f.patch.replace(/\n$/, "")),
+  }));
 }
 
 /** New-side commentable lines for one file's standalone hunk patch (no file headers). */
@@ -197,7 +182,6 @@ export async function gatherPr(
     per_page: 100,
   });
   let allFiles: FileDiff[];
-  const omitted: string[] = [];
   try {
     const diffResponse = await octokit.request(
       "GET /repos/{owner}/{repo}/pulls/{pull_number}",
@@ -213,9 +197,14 @@ export async function gatherPr(
     if ((err as { status?: number }).status !== 406) throw err;
     // PR too large for GitHub to render as one diff; per-file patches still work.
     allFiles = filesFromListFiles(prFiles);
-    for (const f of prFiles)
-      if (!f.patch && !isExcluded(f.filename)) omitted.push(f.filename);
   }
+  // patchless files (binary, too large) are reported
+  const present = new Set(allFiles.map((f) => f.path));
+  const omitted = prFiles
+    .filter(
+      (f) => !f.patch && !present.has(f.filename) && !isExcluded(f.filename),
+    )
+    .map((f) => f.filename);
   const reviewable = allFiles.filter((f) => !isExcluded(f.path));
   const { files, skipped } = degradeIfOversized(reviewable);
   return {
