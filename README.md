@@ -1,7 +1,7 @@
 # Reviewer Two
 
 [![CI](https://github.com/AZOGOAT/reviewer-two/actions/workflows/ci.yml/badge.svg)](https://github.com/AZOGOAT/reviewer-two/actions/workflows/ci.yml)
-[![Marketplace](https://img.shields.io/github/v/release/AZOGOAT/reviewer-two?label=marketplace&logo=github)](https://github.com/marketplace/actions/reviewer-two)
+[![Marketplace](https://img.shields.io/github/v/release/AZOGOAT/reviewer-two?label=marketplace&logo=github)](https://github.com/marketplace/actions/reviewer-two-ai)
 [![License: MIT](https://img.shields.io/github/license/AZOGOAT/reviewer-two)](LICENSE)
 
 Named for academia's Reviewer #2: reads everything, questions everything, approves nothing.
