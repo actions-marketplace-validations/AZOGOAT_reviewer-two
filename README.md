@@ -12,6 +12,16 @@ Before commenting it explores the repo with read-only tools, then re-checks ever
 
 Works with any language. Conventions come from your repo, not the tool.
 
+## Where it fits
+
+There are plenty of AI code review tools out there. Here is what makes this one worth your workflow file:
+
+- **No platform, no server, no subscription.** One Action, one workflow file, done. You bring your own API key and pay your own bill, which for a mid-size PR is the price of a coffee, not a seat license.
+- **It reviews where your team already argues about code.** Commit-time CLIs and editor plugins catch things early on your machine; Reviewer Two shows up on the PR page as a reviewer you request like any other, and its verdict lands in the same place a human's would.
+- **Invited, never uninvited.** No drive-by comments on every push. It runs when someone asks, double-checks every finding before posting, and a re-request picks up where it left off instead of repeating itself.
+
+Want dashboards, metrics, and lint-as-you-type? Not this tool. This one does what Reviewer #2 has always done: show up when summoned, read everything, and say exactly what is wrong.
+
 ## Setup
 
 Two ways to run it.
