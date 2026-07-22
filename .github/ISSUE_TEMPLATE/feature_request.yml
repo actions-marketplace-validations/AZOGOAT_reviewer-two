@@ -1,0 +1,16 @@
+name: Feature request
+description: Something the reviewer should do or do better
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you running into? A concrete example from a real PR helps a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: How should it behave instead? Skip this if you only have the problem.

@@ -1,0 +1,29 @@
+name: Bug report
+description: Something broke or behaved wrong
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did the action do, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Workflow setup
+      description: The relevant part of your workflow file (label trigger or team mode, inputs you set). Redact anything private.
+      render: yaml
+  - type: textarea
+    id: logs
+    attributes:
+      label: Run logs
+      description: Relevant lines from the action run log, if you have them.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Tag or commit you run, e.g. v1
+      placeholder: v1

@@ -1,5 +1,11 @@
 # Reviewer Two
 
+[![CI](https://github.com/AZOGOAT/reviewer-two/actions/workflows/ci.yml/badge.svg)](https://github.com/AZOGOAT/reviewer-two/actions/workflows/ci.yml)
+[![Marketplace](https://img.shields.io/github/v/release/AZOGOAT/reviewer-two?label=marketplace&logo=github)](https://github.com/marketplace/actions/reviewer-two)
+[![License: MIT](https://img.shields.io/github/license/AZOGOAT/reviewer-two)](LICENSE)
+
+Named for academia's Reviewer #2: reads everything, questions everything, approves nothing.
+
 A GitHub Action that reviews pull requests and posts the result as a normal GitHub review: inline comments, suggestion blocks where the fix is obvious, and a COMMENT or REQUEST_CHANGES verdict. It never approves, and it cannot touch your code: the token only gets contents read and pull-requests write.
 
 Before commenting it explores the repo with read-only tools, then re-checks every finding and drops the ones it cannot defend. The bias is fewer, better comments: nits fold into the review body instead of inline noise, anything a linter would catch is skipped, and each finding cites the rule it breaks.
@@ -112,3 +118,11 @@ Only rule files matching the PR's changed paths are loaded.
 ## Model and cost
 
 The default is the strongest Claude model because review quality is the whole point; a deep review of a mid-size PR lands around 1 to 3 USD. Any repo can set a cheaper `model`. GPT models need only the model id and an `openai_api_key` secret; there are no separate code paths.
+
+## Contributing
+
+Bug reports and PRs welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). For security issues, see [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE)
