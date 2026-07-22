@@ -102,6 +102,7 @@ export function buildVerifyPrompt(finding: Finding): string {
     "Confirm it only if you can cite concrete code evidence that the problem is real in the current code.",
     "Discard it if it is speculative, already handled elsewhere, based on a misreading, or would be caught by a linter or formatter.",
     "Discard it if its correctness depends on code or configuration outside this repository, such as a reusable workflow, external action, or service the tools cannot read. The absence of a guard or check in the caller is not evidence of a problem when the referenced external code may implement it.",
+    "If the problem is real but the evidence shows its consequence is smaller or larger than the stated severity, confirm it with the corrected severity. Major and above mean broken behavior someone will actually hit; cosmetic or hygiene issues are minor at most.",
     "",
     `File: ${finding.path}`,
     `Line: ${finding.line}`,

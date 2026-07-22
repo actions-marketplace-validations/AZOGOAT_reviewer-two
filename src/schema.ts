@@ -42,5 +42,11 @@ export const verificationSchema = z.object({
   evidence: z
     .string()
     .describe("Concrete code evidence, or the reason for discarding"),
+  severity: z
+    .enum(severities)
+    .optional()
+    .describe(
+      "Corrected severity when the evidence shows the impact differs from what was stated",
+    ),
 });
 export type Verification = z.infer<typeof verificationSchema>;

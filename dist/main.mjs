@@ -79827,7 +79827,7 @@ function exceedsTokenBudget(budget) {
 async function runStructured(opts) {
   const result = await generateText({
     model: resolveModel(opts.modelId),
-    temperature: 0.2,
+    providerOptions: { anthropic: { structuredOutputMode: "jsonTool" } },
     instructions: {
       role: "system",
       content: opts.system,
@@ -80148,6 +80148,7 @@ function buildVerifyPrompt(finding) {
     "Confirm it only if you can cite concrete code evidence that the problem is real in the current code.",
     "Discard it if it is speculative, already handled elsewhere, based on a misreading, or would be caught by a linter or formatter.",
     "Discard it if its correctness depends on code or configuration outside this repository, such as a reusable workflow, external action, or service the tools cannot read. The absence of a guard or check in the caller is not evidence of a problem when the referenced external code may implement it.",
+    "If the problem is real but the evidence shows its consequence is smaller or larger than the stated severity, confirm it with the corrected severity. Major and above mean broken behavior someone will actually hit; cosmetic or hygiene issues are minor at most.",
     "",
     `File: ${finding.path}`,
     `Line: ${finding.line}`,
@@ -80344,7 +80345,10 @@ var reviewOutputSchema = external_exports.object({
 });
 var verificationSchema = external_exports.object({
   verdict: external_exports.enum(["confirmed", "discarded"]),
-  evidence: external_exports.string().describe("Concrete code evidence, or the reason for discarding")
+  evidence: external_exports.string().describe("Concrete code evidence, or the reason for discarding"),
+  severity: external_exports.enum(severities).optional().describe(
+    "Corrected severity when the evidence shows the impact differs from what was stated"
+  )
 });
 
 // src/verify.ts
@@ -80361,7 +80365,12 @@ async function verifyFindings(opts) {
         tools: opts.tools,
         maxToolCalls: opts.maxToolCallsPerFinding ?? DEFAULT_VERIFY_TOOL_CALLS
       });
-      if (output.verdict === "confirmed") confirmed.push(finding);
+      if (output.verdict === "confirmed") {
+        confirmed.push({
+          ...finding,
+          severity: output.severity ?? finding.severity
+        });
+      }
     } catch {
       confirmed.push(finding);
     }

@@ -52,7 +52,7 @@ export async function runStructured<T>(
 ): Promise<{ output: T; toolCalls: number }> {
   const result = await generateText({
     model: resolveModel(opts.modelId),
-    temperature: 0.2,
+    providerOptions: { anthropic: { structuredOutputMode: "jsonTool" } },
     instructions: {
       role: "system",
       content: opts.system,

@@ -28,7 +28,12 @@ export async function verifyFindings(opts: {
         tools: opts.tools,
         maxToolCalls: opts.maxToolCallsPerFinding ?? DEFAULT_VERIFY_TOOL_CALLS,
       });
-      if (output.verdict === "confirmed") confirmed.push(finding);
+      if (output.verdict === "confirmed") {
+        confirmed.push({
+          ...finding,
+          severity: output.severity ?? finding.severity,
+        });
+      }
     } catch {
       confirmed.push(finding);
     }
