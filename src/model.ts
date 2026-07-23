@@ -1,6 +1,12 @@
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai } from "@ai-sdk/openai";
-import { generateText, isStepCount, Output, tool } from "ai";
+import {
+  generateText,
+  isStepCount,
+  type LanguageModel,
+  Output,
+  tool,
+} from "ai";
 import type { z } from "zod";
 
 export { tool as defineTool };
@@ -32,8 +38,45 @@ export function exceedsTokenBudget(budget?: number) {
   };
 }
 
+// Leaves headroom under the model's ~200k window for the wrap-up step.
+const CONTEXT_WRAP_UP_TOKENS = 150_000;
+
+/**
+ * True when the next step must stop exploring and write the review: the step
+ * cap, the token budget, or the context window is nearly full (last step's
+ * total tokens stand in for context size). Called from prepareStep.
+ */
+export function shouldWrapUp(opts: {
+  stepNumber: number;
+  steps: UsageStep[];
+  maxToolCalls: number;
+  tokenBudget?: number;
+}): boolean {
+  if (opts.stepNumber >= opts.maxToolCalls - 1) return true;
+  if (exceedsTokenBudget(opts.tokenBudget)({ steps: opts.steps })) return true;
+  const last = opts.steps[opts.steps.length - 1];
+  return (last?.usage.totalTokens ?? 0) >= CONTEXT_WRAP_UP_TOKENS;
+}
+
+/**
+ * Fails a run that ended without a review, naming the finish reason and token
+ * usage. The SDK on its own surfaces only a bare "No output generated.".
+ */
+export function assertFinished(result: {
+  finishReason: string;
+  steps: unknown[];
+  totalUsage: { totalTokens?: number };
+}): void {
+  if (result.finishReason === "stop") return;
+  throw new Error(
+    `The model stopped without producing the review output ` +
+      `(finish reason "${result.finishReason}", ${result.steps.length} steps, ` +
+      `${result.totalUsage.totalTokens ?? "unknown"} total tokens).`,
+  );
+}
+
 export interface AgenticCallOptions<T> {
-  modelId: string;
+  modelId: string | LanguageModel;
   system: string;
   prompt: string;
   schema: z.ZodType<T>;
@@ -50,8 +93,12 @@ export interface AgenticCallOptions<T> {
 export async function runStructured<T>(
   opts: AgenticCallOptions<T>,
 ): Promise<{ output: T; toolCalls: number }> {
+  const maxToolCalls = opts.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
   const result = await generateText({
-    model: resolveModel(opts.modelId),
+    model:
+      typeof opts.modelId === "string"
+        ? resolveModel(opts.modelId)
+        : opts.modelId,
     providerOptions: { anthropic: { structuredOutputMode: "jsonTool" } },
     instructions: {
       role: "system",
@@ -60,13 +107,21 @@ export async function runStructured<T>(
     },
     messages: [{ role: "user", content: opts.prompt }],
     tools: opts.tools,
-    // step count approximates tool calls; a step may batch parallel calls
-    stopWhen: [
-      isStepCount(opts.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS),
-      exceedsTokenBudget(opts.tokenBudget),
-    ],
+    // prepareStep forces a final review-only step (exploration tools hidden)
+    // when a limit is hit; stopWhen is only a backstop one step further out
+    prepareStep: ({ stepNumber, steps }) =>
+      shouldWrapUp({
+        stepNumber,
+        steps,
+        maxToolCalls,
+        tokenBudget: opts.tokenBudget,
+      })
+        ? { activeTools: [] }
+        : undefined,
+    stopWhen: isStepCount(maxToolCalls + 1),
     output: Output.object({ schema: opts.schema }),
   });
+  assertFinished(result);
   const toolCalls = result.steps.reduce((n, s) => n + s.toolCalls.length, 0);
   return { output: opts.schema.parse(result.output), toolCalls };
 }

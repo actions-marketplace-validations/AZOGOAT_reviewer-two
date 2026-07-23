@@ -79811,9 +79811,23 @@ function exceedsTokenBudget(budget) {
     return used >= budget;
   };
 }
+var CONTEXT_WRAP_UP_TOKENS = 15e4;
+function shouldWrapUp(opts) {
+  if (opts.stepNumber >= opts.maxToolCalls - 1) return true;
+  if (exceedsTokenBudget(opts.tokenBudget)({ steps: opts.steps })) return true;
+  const last = opts.steps[opts.steps.length - 1];
+  return (last?.usage.totalTokens ?? 0) >= CONTEXT_WRAP_UP_TOKENS;
+}
+function assertFinished(result) {
+  if (result.finishReason === "stop") return;
+  throw new Error(
+    `The model stopped without producing the review output (finish reason "${result.finishReason}", ${result.steps.length} steps, ${result.totalUsage.totalTokens ?? "unknown"} total tokens).`
+  );
+}
 async function runStructured(opts) {
+  const maxToolCalls = opts.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
   const result = await generateText({
-    model: resolveModel(opts.modelId),
+    model: typeof opts.modelId === "string" ? resolveModel(opts.modelId) : opts.modelId,
     providerOptions: { anthropic: { structuredOutputMode: "jsonTool" } },
     instructions: {
       role: "system",
@@ -79822,13 +79836,18 @@ async function runStructured(opts) {
     },
     messages: [{ role: "user", content: opts.prompt }],
     tools: opts.tools,
-    // step count approximates tool calls; a step may batch parallel calls
-    stopWhen: [
-      isStepCount(opts.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS),
-      exceedsTokenBudget(opts.tokenBudget)
-    ],
+    // prepareStep forces a final review-only step (exploration tools hidden)
+    // when a limit is hit; stopWhen is only a backstop one step further out
+    prepareStep: ({ stepNumber, steps }) => shouldWrapUp({
+      stepNumber,
+      steps,
+      maxToolCalls,
+      tokenBudget: opts.tokenBudget
+    }) ? { activeTools: [] } : void 0,
+    stopWhen: isStepCount(maxToolCalls + 1),
     output: output_exports.object({ schema: opts.schema })
   });
+  assertFinished(result);
   const toolCalls = result.steps.reduce((n, s) => n + s.toolCalls.length, 0);
   return { output: opts.schema.parse(result.output), toolCalls };
 }
@@ -79844,6 +79863,8 @@ var IGNORED_DIRS = /* @__PURE__ */ new Set([
   "_generated"
 ]);
 var MAX_READ_LINES = 400;
+var READ_LIMIT_CAP = 800;
+var MAX_READ_CHARS = 5e4;
 var MAX_GREP_MATCHES = 100;
 var MAX_LIST_ENTRIES = 200;
 var MAX_FILE_BYTES = 1e6;
@@ -79880,9 +79901,15 @@ function readFileSlice(root, file2, offset = 1, limit = MAX_READ_LINES) {
       return `Error: file larger than ${MAX_FILE_BYTES} bytes`;
     const lines = readFileSync2(abs, "utf8").split("\n");
     const start = Math.max(offset, 1);
-    const window2 = lines.slice(start - 1, start - 1 + limit);
-    const body = window2.map((l, i) => `${start + i}	${l}`).join("\n");
-    const truncated = start - 1 + limit < lines.length ? `
+    const window2 = lines.slice(
+      start - 1,
+      start - 1 + Math.min(limit, READ_LIMIT_CAP)
+    );
+    let body = window2.map((l, i) => `${start + i}	${l}`).join("\n");
+    if (body.length > MAX_READ_CHARS)
+      body = `${body.slice(0, MAX_READ_CHARS)}
+[truncated at ${MAX_READ_CHARS} characters]`;
+    const truncated = start - 1 + window2.length < lines.length ? `
 [truncated, file has ${lines.length} lines]` : "";
     return body + truncated;
   } catch (err) {
@@ -79956,7 +79983,7 @@ function makeExploreTools(repoRoot) {
       inputSchema: external_exports.object({
         path: external_exports.string().describe("Repository-relative file path"),
         offset: external_exports.number().int().positive().optional().describe("1-based first line, default 1"),
-        limit: external_exports.number().int().positive().optional().describe("Max lines, default 400")
+        limit: external_exports.number().int().positive().optional().describe("Max lines, default 400, capped at 800")
       }),
       execute: async ({ path: p, offset, limit }) => readFileSlice(repoRoot, p, offset, limit)
     }),

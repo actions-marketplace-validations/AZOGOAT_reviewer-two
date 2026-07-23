@@ -13,6 +13,8 @@ const IGNORED_DIRS = new Set([
   "_generated",
 ]);
 const MAX_READ_LINES = 400;
+const READ_LIMIT_CAP = 800;
+const MAX_READ_CHARS = 50_000;
 const MAX_GREP_MATCHES = 100;
 const MAX_LIST_ENTRIES = 200;
 const MAX_FILE_BYTES = 1_000_000;
@@ -48,7 +50,8 @@ export function safePath(root: string, p: string): string {
   return abs;
 }
 
-/** Reads a numbered window of a file. */
+/** Reads a numbered window of a file. Line and character caps keep one read
+ * from filling the model's context window. */
 export function readFileSlice(
   root: string,
   file: string,
@@ -61,10 +64,15 @@ export function readFileSlice(
       return `Error: file larger than ${MAX_FILE_BYTES} bytes`;
     const lines = readFileSync(abs, "utf8").split("\n");
     const start = Math.max(offset, 1);
-    const window = lines.slice(start - 1, start - 1 + limit);
-    const body = window.map((l, i) => `${start + i}\t${l}`).join("\n");
+    const window = lines.slice(
+      start - 1,
+      start - 1 + Math.min(limit, READ_LIMIT_CAP),
+    );
+    let body = window.map((l, i) => `${start + i}\t${l}`).join("\n");
+    if (body.length > MAX_READ_CHARS)
+      body = `${body.slice(0, MAX_READ_CHARS)}\n[truncated at ${MAX_READ_CHARS} characters]`;
     const truncated =
-      start - 1 + limit < lines.length
+      start - 1 + window.length < lines.length
         ? `\n[truncated, file has ${lines.length} lines]`
         : "";
     return body + truncated;
@@ -160,7 +168,7 @@ export function makeExploreTools(repoRoot: string) {
           .int()
           .positive()
           .optional()
-          .describe("Max lines, default 400"),
+          .describe("Max lines, default 400, capped at 800"),
       }),
       execute: async ({ path: p, offset, limit }) =>
         readFileSlice(repoRoot, p, offset, limit),

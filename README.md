@@ -116,7 +116,7 @@ Only rule files matching the PR's changed paths are loaded.
 | --- | --- | --- |
 | model | claude-opus-4-8 | Any claude-* or gpt-*/o* model id |
 | max_tool_calls | 50 | Exploration cap; a runaway guard, raise it for large repos |
-| exploration_token_budget | unset | Optional total token cap across exploration |
+| exploration_token_budget | unset | Optional total token cap; when spent, the review wraps up early instead of failing |
 | max_inline_comments | 15 | Extra findings collapse into the review body |
 | inline_severity_threshold | minor | Minimum severity posted inline; nits never post inline |
 | request_changes_threshold | major | Minimum severity for a REQUEST_CHANGES verdict |
