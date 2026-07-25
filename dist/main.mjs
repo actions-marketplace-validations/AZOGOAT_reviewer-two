@@ -79818,11 +79818,45 @@ function shouldWrapUp(opts) {
   const last = opts.steps[opts.steps.length - 1];
   return (last?.usage.totalTokens ?? 0) >= CONTEXT_WRAP_UP_TOKENS;
 }
+function placeCacheBreakpoints(messages) {
+  const last = messages.length - 1;
+  return messages.map((message, i) => {
+    const marked = i === 0 || i >= last - 1;
+    if (!marked && message.providerOptions?.anthropic === void 0) {
+      return message;
+    }
+    const providerOptions = { ...message.providerOptions };
+    const anthropic2 = {
+      ...providerOptions.anthropic
+    };
+    if (marked) anthropic2.cacheControl = { type: "ephemeral" };
+    else delete anthropic2.cacheControl;
+    if (Object.keys(anthropic2).length > 0) {
+      providerOptions.anthropic = anthropic2;
+    } else {
+      delete providerOptions.anthropic;
+    }
+    if (Object.keys(providerOptions).length === 0) {
+      const { providerOptions: _dropped, ...rest } = message;
+      return rest;
+    }
+    return { ...message, providerOptions };
+  });
+}
 function assertFinished(result) {
   if (result.finishReason === "stop") return;
   throw new Error(
     `The model stopped without producing the review output (finish reason "${result.finishReason}", ${result.steps.length} steps, ${result.totalUsage.totalTokens ?? "unknown"} total tokens).`
   );
+}
+function toUsageBreakdown(totalUsage) {
+  const input = totalUsage.inputTokenDetails;
+  return {
+    noCache: input.noCacheTokens ?? 0,
+    cacheRead: input.cacheReadTokens ?? 0,
+    cacheWrite: input.cacheWriteTokens ?? 0,
+    output: totalUsage.outputTokens ?? 0
+  };
 }
 async function runStructured(opts) {
   const maxToolCalls = opts.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
@@ -79836,20 +79870,28 @@ async function runStructured(opts) {
     },
     messages: [{ role: "user", content: opts.prompt }],
     tools: opts.tools,
-    // prepareStep forces a final review-only step (exploration tools hidden)
-    // when a limit is hit; stopWhen is only a backstop one step further out
-    prepareStep: ({ stepNumber, steps }) => shouldWrapUp({
-      stepNumber,
-      steps,
-      maxToolCalls,
-      tokenBudget: opts.tokenBudget
-    }) ? { activeTools: [] } : void 0,
+    // prepareStep re-stamps cache breakpoints every step, and forces a final
+    // review-only step (exploration tools hidden) when a limit is hit;
+    // stopWhen is only a backstop one step further out
+    prepareStep: ({ stepNumber, steps, messages }) => ({
+      messages: placeCacheBreakpoints(messages),
+      ...shouldWrapUp({
+        stepNumber,
+        steps,
+        maxToolCalls,
+        tokenBudget: opts.tokenBudget
+      }) ? { activeTools: [] } : {}
+    }),
     stopWhen: isStepCount(maxToolCalls + 1),
     output: output_exports.object({ schema: opts.schema })
   });
   assertFinished(result);
   const toolCalls = result.steps.reduce((n, s) => n + s.toolCalls.length, 0);
-  return { output: opts.schema.parse(result.output), toolCalls };
+  return {
+    output: opts.schema.parse(result.output),
+    toolCalls,
+    usage: toUsageBreakdown(result.usage)
+  };
 }
 
 // src/explore.ts
@@ -80063,6 +80105,12 @@ async function fetchLinkedIssues(octokit, refs) {
 // src/prompts.ts
 import { readFileSync as readFileSync3 } from "fs";
 import { join } from "path";
+var ISSUE_COMMENT_LIMIT = 10;
+var ISSUE_COMMENT_CHARS = 1500;
+function clipComment(body) {
+  if (body.length <= ISSUE_COMMENT_CHARS) return body;
+  return `${body.slice(0, ISSUE_COMMENT_CHARS)} [comment truncated]`;
+}
 function loadBasePrompt(actionRoot) {
   return readFileSync3(join(actionRoot, "prompt", "system.md"), "utf8");
 }
@@ -80099,7 +80147,12 @@ ${meta3.body || "(no description)"}`
     const rendered = linkedIssues.map((issue3) => {
       const kind = issue3.isPullRequest ? "pull request" : "issue";
       const header = `## ${issue3.ref.owner}/${issue3.ref.repo}#${issue3.ref.number} (${kind}, ${issue3.state}): ${issue3.title}`;
-      const comments = issue3.comments.map((c) => `${c.author}: ${c.body}`).join("\n\n");
+      const kept = issue3.comments.slice(-ISSUE_COMMENT_LIMIT);
+      const omitted = issue3.comments.length - kept.length;
+      const comments = [
+        omitted > 0 ? `(${omitted} earlier comments omitted)` : "",
+        ...kept.map((c) => `${c.author}: ${clipComment(c.body)}`)
+      ].filter(Boolean).join("\n\n");
       return [header, issue3.body || "(no body)", comments].filter(Boolean).join("\n\n");
     }).join("\n\n");
     parts.push(
@@ -80369,9 +80422,15 @@ var verificationSchema = external_exports.object({
 var DEFAULT_VERIFY_TOOL_CALLS = 10;
 async function verifyFindings(opts) {
   const confirmed = [];
+  const usage = {
+    noCache: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    output: 0
+  };
   for (const finding of opts.findings) {
     try {
-      const { output } = await runStructured({
+      const { output, usage: callUsage } = await runStructured({
         modelId: opts.modelId,
         system: opts.system,
         prompt: buildVerifyPrompt(finding),
@@ -80379,6 +80438,10 @@ async function verifyFindings(opts) {
         tools: opts.tools,
         maxToolCalls: opts.maxToolCallsPerFinding ?? DEFAULT_VERIFY_TOOL_CALLS
       });
+      usage.noCache += callUsage.noCache;
+      usage.cacheRead += callUsage.cacheRead;
+      usage.cacheWrite += callUsage.cacheWrite;
+      usage.output += callUsage.output;
       if (output.verdict === "confirmed") {
         confirmed.push({
           ...finding,
@@ -80389,7 +80452,7 @@ async function verifyFindings(opts) {
       confirmed.push(finding);
     }
   }
-  return confirmed;
+  return { findings: confirmed, usage };
 }
 
 // src/workflows.ts
@@ -80448,6 +80511,10 @@ function severityInput(name24, fallback) {
   }
   return raw;
 }
+var DEFAULT_TOKEN_BUDGET = 5e6;
+function describeUsage(usage) {
+  return `${usage.noCache} uncached, ${usage.cacheRead} cache reads, ${usage.cacheWrite} cache writes, ${usage.output} output`;
+}
 function numberInput(name24, fallback) {
   const raw = getInput(name24);
   if (!raw) return fallback;
@@ -80463,7 +80530,10 @@ function readInputs() {
   return {
     model: getInput("model") || "claude-opus-4-8",
     maxToolCalls: numberInput("max_tool_calls", 50),
-    explorationTokenBudget: numberInput("exploration_token_budget", void 0),
+    explorationTokenBudget: numberInput(
+      "exploration_token_budget",
+      DEFAULT_TOKEN_BUDGET
+    ),
     maxInlineComments: numberInput("max_inline_comments", 15),
     inlineSeverityThreshold: severityInput(
       "inline_severity_threshold",
@@ -80584,15 +80654,18 @@ async function run() {
     info(
       `Phase 1 done: ${phase1.output.findings.length} candidate findings, ${phase1.toolCalls} tool calls`
     );
+    info(`Phase 1 tokens: ${describeUsage(phase1.usage)}`);
     const fresh = dedupeAgainstPrevious(phase1.output.findings, previous);
     info(`Phase 2: verifying ${fresh.length} findings`);
-    const confirmed = await verifyFindings({
+    const phase2 = await verifyFindings({
       modelId: inputs.model,
       system,
       findings: fresh,
       tools
     });
+    const confirmed = phase2.findings;
     info(`Phase 2 done: ${confirmed.length} confirmed`);
+    info(`Phase 2 tokens: ${describeUsage(phase2.usage)}`);
     const plan = planReview(
       { summary: phase1.output.summary, findings: confirmed },
       pr.files,

@@ -10,7 +10,7 @@ import {
 } from "./context.js";
 import { makeExploreTools } from "./explore.js";
 import { fetchLinkedIssues, parseIssueRefs } from "./issues.js";
-import { runStructured } from "./model.js";
+import { runStructured, type UsageBreakdown } from "./model.js";
 import {
   buildReviewPrompt,
   buildSystemPrompt,
@@ -44,18 +44,24 @@ function severityInput(name: string, fallback: Severity): Severity {
   return raw as Severity;
 }
 
+// Sized so a worst-case exploration stays a few dollars with caching on;
+// typical reviews finish well under it.
+const DEFAULT_TOKEN_BUDGET = 5_000_000;
+
+/** One log line per phase; healthy caching shows uncached far below cache reads. */
+function describeUsage(usage: UsageBreakdown): string {
+  return (
+    `${usage.noCache} uncached, ${usage.cacheRead} cache reads, ` +
+    `${usage.cacheWrite} cache writes, ${usage.output} output`
+  );
+}
+
 /**
- * Parses a numeric input. Empty input returns the fallback (undefined for
- * budgets with none). A non-empty value that is not a finite positive
- * number throws, naming the input and the bad value, so it never flows
- * downstream as NaN.
+ * Parses a numeric input. Empty input returns the fallback. A non-empty
+ * value that is not a finite positive number throws, naming the input and
+ * the bad value, so it never flows downstream as NaN.
  */
-function numberInput(name: string, fallback: number): number;
-function numberInput(name: string, fallback: undefined): number | undefined;
-function numberInput(
-  name: string,
-  fallback: number | undefined,
-): number | undefined {
+function numberInput(name: string, fallback: number): number {
   const raw = core.getInput(name);
   if (!raw) return fallback;
   const value = Number(raw);
@@ -72,7 +78,10 @@ export function readInputs(): Inputs {
   return {
     model: core.getInput("model") || "claude-opus-4-8",
     maxToolCalls: numberInput("max_tool_calls", 50),
-    explorationTokenBudget: numberInput("exploration_token_budget", undefined),
+    explorationTokenBudget: numberInput(
+      "exploration_token_budget",
+      DEFAULT_TOKEN_BUDGET,
+    ),
     maxInlineComments: numberInput("max_inline_comments", 15),
     inlineSeverityThreshold: severityInput(
       "inline_severity_threshold",
@@ -223,15 +232,19 @@ export async function run(): Promise<void> {
       `Phase 1 done: ${phase1.output.findings.length} candidate findings, ${phase1.toolCalls} tool calls`,
     );
 
+    core.info(`Phase 1 tokens: ${describeUsage(phase1.usage)}`);
+
     const fresh = dedupeAgainstPrevious(phase1.output.findings, previous);
     core.info(`Phase 2: verifying ${fresh.length} findings`);
-    const confirmed = await verifyFindings({
+    const phase2 = await verifyFindings({
       modelId: inputs.model,
       system,
       findings: fresh,
       tools,
     });
+    const confirmed = phase2.findings;
     core.info(`Phase 2 done: ${confirmed.length} confirmed`);
+    core.info(`Phase 2 tokens: ${describeUsage(phase2.usage)}`);
 
     const plan = planReview(
       { summary: phase1.output.summary, findings: confirmed },

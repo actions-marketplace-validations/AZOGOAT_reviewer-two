@@ -4,6 +4,7 @@ import {
   generateText,
   isStepCount,
   type LanguageModel,
+  type ModelMessage,
   Output,
   tool,
 } from "ai";
@@ -59,6 +60,40 @@ export function shouldWrapUp(opts: {
 }
 
 /**
+ * Stamps Anthropic cache breakpoints on the first message (the PR context)
+ * and the last two messages, clearing markers left at earlier positions.
+ * With the system breakpoint that is four total, Anthropic's limit; the
+ * moving pair keeps each step's prefix a cache hit as the history grows.
+ */
+export function placeCacheBreakpoints(
+  messages: ModelMessage[],
+): ModelMessage[] {
+  const last = messages.length - 1;
+  return messages.map((message, i) => {
+    const marked = i === 0 || i >= last - 1;
+    if (!marked && message.providerOptions?.anthropic === undefined) {
+      return message;
+    }
+    const providerOptions = { ...message.providerOptions };
+    const anthropic = {
+      ...(providerOptions.anthropic as Record<string, unknown> | undefined),
+    };
+    if (marked) anthropic.cacheControl = { type: "ephemeral" };
+    else delete anthropic.cacheControl;
+    if (Object.keys(anthropic).length > 0) {
+      providerOptions.anthropic = anthropic as never;
+    } else {
+      delete providerOptions.anthropic;
+    }
+    if (Object.keys(providerOptions).length === 0) {
+      const { providerOptions: _dropped, ...rest } = message;
+      return rest as ModelMessage;
+    }
+    return { ...message, providerOptions };
+  });
+}
+
+/**
  * Fails a run that ended without a review, naming the finish reason and token
  * usage. The SDK on its own surfaces only a bare "No output generated.".
  */
@@ -75,6 +110,33 @@ export function assertFinished(result: {
   );
 }
 
+/** Token counts by price class, for spotting broken caching in run logs. */
+export interface UsageBreakdown {
+  noCache: number;
+  cacheRead: number;
+  cacheWrite: number;
+  output: number;
+}
+
+interface TotalUsage {
+  inputTokenDetails: {
+    noCacheTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
+  outputTokens?: number;
+}
+
+function toUsageBreakdown(totalUsage: TotalUsage): UsageBreakdown {
+  const input = totalUsage.inputTokenDetails;
+  return {
+    noCache: input.noCacheTokens ?? 0,
+    cacheRead: input.cacheReadTokens ?? 0,
+    cacheWrite: input.cacheWriteTokens ?? 0,
+    output: totalUsage.outputTokens ?? 0,
+  };
+}
+
 export interface AgenticCallOptions<T> {
   modelId: string | LanguageModel;
   system: string;
@@ -87,12 +149,13 @@ export interface AgenticCallOptions<T> {
 
 /**
  * One agentic call with structured output. Used by phase 1 (with generous
- * budgets) and phase 2 (with small ones). The system message carries an
- * Anthropic cache breakpoint; OpenAI models ignore that provider option.
+ * budgets) and phase 2 (with small ones). The system message and, per step,
+ * the prompt and latest messages carry Anthropic cache breakpoints; OpenAI
+ * models ignore that provider option.
  */
 export async function runStructured<T>(
   opts: AgenticCallOptions<T>,
-): Promise<{ output: T; toolCalls: number }> {
+): Promise<{ output: T; toolCalls: number; usage: UsageBreakdown }> {
   const maxToolCalls = opts.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
   const result = await generateText({
     model:
@@ -107,21 +170,28 @@ export async function runStructured<T>(
     },
     messages: [{ role: "user", content: opts.prompt }],
     tools: opts.tools,
-    // prepareStep forces a final review-only step (exploration tools hidden)
-    // when a limit is hit; stopWhen is only a backstop one step further out
-    prepareStep: ({ stepNumber, steps }) =>
-      shouldWrapUp({
+    // prepareStep re-stamps cache breakpoints every step, and forces a final
+    // review-only step (exploration tools hidden) when a limit is hit;
+    // stopWhen is only a backstop one step further out
+    prepareStep: ({ stepNumber, steps, messages }) => ({
+      messages: placeCacheBreakpoints(messages),
+      ...(shouldWrapUp({
         stepNumber,
         steps,
         maxToolCalls,
         tokenBudget: opts.tokenBudget,
       })
         ? { activeTools: [] }
-        : undefined,
+        : {}),
+    }),
     stopWhen: isStepCount(maxToolCalls + 1),
     output: Output.object({ schema: opts.schema }),
   });
   assertFinished(result);
   const toolCalls = result.steps.reduce((n, s) => n + s.toolCalls.length, 0);
-  return { output: opts.schema.parse(result.output), toolCalls };
+  return {
+    output: opts.schema.parse(result.output),
+    toolCalls,
+    usage: toUsageBreakdown(result.usage),
+  };
 }

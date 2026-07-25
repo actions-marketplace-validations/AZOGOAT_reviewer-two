@@ -6,6 +6,15 @@ import type { LoadedRules } from "./rules.js";
 import type { Finding } from "./schema.js";
 import type { ReferencedWorkflow } from "./workflows.js";
 
+const ISSUE_COMMENT_LIMIT = 10;
+const ISSUE_COMMENT_CHARS = 1_500;
+
+/** Clips one issue comment to the size cap, marking the cut. */
+function clipComment(body: string): string {
+  if (body.length <= ISSUE_COMMENT_CHARS) return body;
+  return `${body.slice(0, ISSUE_COMMENT_CHARS)} [comment truncated]`;
+}
+
 /** Reads the bundled reviewer persona. actionRoot is the action's own directory. */
 export function loadBasePrompt(actionRoot: string): string {
   return readFileSync(join(actionRoot, "prompt", "system.md"), "utf8");
@@ -51,8 +60,13 @@ export function buildReviewPrompt(opts: {
       .map((issue) => {
         const kind = issue.isPullRequest ? "pull request" : "issue";
         const header = `## ${issue.ref.owner}/${issue.ref.repo}#${issue.ref.number} (${kind}, ${issue.state}): ${issue.title}`;
-        const comments = issue.comments
-          .map((c) => `${c.author}: ${c.body}`)
+        const kept = issue.comments.slice(-ISSUE_COMMENT_LIMIT);
+        const omitted = issue.comments.length - kept.length;
+        const comments = [
+          omitted > 0 ? `(${omitted} earlier comments omitted)` : "",
+          ...kept.map((c) => `${c.author}: ${clipComment(c.body)}`),
+        ]
+          .filter(Boolean)
           .join("\n\n");
         return [header, issue.body || "(no body)", comments]
           .filter(Boolean)

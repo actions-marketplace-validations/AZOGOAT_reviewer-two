@@ -12,8 +12,8 @@ inputs:
     description: Cap on exploration tool calls; a runaway guard, not a depth limit
     default: "50"
   exploration_token_budget:
-    description: Optional total token cap; when spent, the review wraps up with what it has found
-    default: ""
+    description: Total token cap; when spent, the review wraps up with what it has found
+    default: "5000000"
   max_inline_comments:
     description: Maximum inline review comments; the rest go into the review body
     default: "15"
