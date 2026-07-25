@@ -12,6 +12,9 @@ on:
       max_tool_calls:
         type: string
         default: "50"
+      exploration_token_budget:
+        type: string
+        default: "5000000"
       max_inline_comments:
         type: string
         default: "15"
@@ -58,6 +61,7 @@ jobs:
           model: ${{ inputs.model }}
           reviewer_login: ${{ inputs.reviewer_login }}
           max_tool_calls: ${{ inputs.max_tool_calls }}
+          exploration_token_budget: ${{ inputs.exploration_token_budget }}
           max_inline_comments: ${{ inputs.max_inline_comments }}
           inline_severity_threshold: ${{ inputs.inline_severity_threshold }}
           request_changes_threshold: ${{ inputs.request_changes_threshold }}
