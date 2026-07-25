@@ -1,14 +1,18 @@
 import type { makeExploreTools } from "./explore.js";
-import { runStructured, type UsageBreakdown } from "./model.js";
+import { addUsage, runStructured, type UsageBreakdown } from "./model.js";
 import { buildVerifyPrompt } from "./prompts.js";
-import { type Finding, verificationSchema } from "./schema.js";
+import { type Finding, severities, verificationSchema } from "./schema.js";
 
-const DEFAULT_VERIFY_TOOL_CALLS = 10;
+const VERIFY_TOOL_CALLS = 10;
+const MAX_VERIFIED_FINDINGS = 20;
 
 /**
  * Phase 2: re-examines each candidate finding with fresh tool access and keeps
  * only findings the model confirms with concrete evidence. On a call failure
  * the finding is kept; verification filters noise, it must not lose findings.
+ * At most MAX_VERIFIED_FINDINGS are verified, most severe first, so a noisy
+ * phase 1 cannot run the job into its timeout; the overflow is dropped and
+ * counted in skipped, never posted unverified.
  * usage sums the phase's calls; a failed call contributes nothing.
  */
 export async function verifyFindings(opts: {
@@ -16,16 +20,20 @@ export async function verifyFindings(opts: {
   system: string;
   findings: Finding[];
   tools: ReturnType<typeof makeExploreTools>;
-  maxToolCallsPerFinding?: number;
-}): Promise<{ findings: Finding[]; usage: UsageBreakdown }> {
+}): Promise<{ findings: Finding[]; usage: UsageBreakdown; skipped: number }> {
   const confirmed: Finding[] = [];
-  const usage: UsageBreakdown = {
+  let usage: UsageBreakdown = {
     noCache: 0,
     cacheRead: 0,
     cacheWrite: 0,
     output: 0,
   };
-  for (const finding of opts.findings) {
+  const selected = [...opts.findings]
+    .sort(
+      (a, b) => severities.indexOf(a.severity) - severities.indexOf(b.severity),
+    )
+    .slice(0, MAX_VERIFIED_FINDINGS);
+  for (const finding of selected) {
     try {
       const { output, usage: callUsage } = await runStructured({
         modelId: opts.modelId,
@@ -33,12 +41,9 @@ export async function verifyFindings(opts: {
         prompt: buildVerifyPrompt(finding),
         schema: verificationSchema,
         tools: opts.tools,
-        maxToolCalls: opts.maxToolCallsPerFinding ?? DEFAULT_VERIFY_TOOL_CALLS,
+        maxToolCalls: VERIFY_TOOL_CALLS,
       });
-      usage.noCache += callUsage.noCache;
-      usage.cacheRead += callUsage.cacheRead;
-      usage.cacheWrite += callUsage.cacheWrite;
-      usage.output += callUsage.output;
+      usage = addUsage(usage, callUsage);
       if (output.verdict === "confirmed") {
         confirmed.push({
           ...finding,
@@ -49,5 +54,9 @@ export async function verifyFindings(opts: {
       confirmed.push(finding);
     }
   }
-  return { findings: confirmed, usage };
+  return {
+    findings: confirmed,
+    usage,
+    skipped: opts.findings.length - selected.length,
+  };
 }

@@ -26,7 +26,7 @@ import { fetchReferencedWorkflows, parseWorkflowRefs } from "./workflows.js";
 export interface Inputs {
   model: string;
   maxToolCalls: number;
-  explorationTokenBudget?: number;
+  explorationTokenBudget: number;
   maxInlineComments: number;
   inlineSeverityThreshold: Severity;
   requestChangesThreshold: Severity;
@@ -243,6 +243,11 @@ export async function run(): Promise<void> {
       tools,
     });
     const confirmed = phase2.findings;
+    if (phase2.skipped > 0) {
+      core.warning(
+        `Verification capped: ${phase2.skipped} lowest-severity candidate findings were not verified and are excluded from the review`,
+      );
+    }
     core.info(`Phase 2 done: ${confirmed.length} confirmed`);
     core.info(`Phase 2 tokens: ${describeUsage(phase2.usage)}`);
 

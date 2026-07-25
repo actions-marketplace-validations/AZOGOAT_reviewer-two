@@ -13,8 +13,6 @@ import type { z } from "zod";
 
 export { tool as defineTool };
 
-const DEFAULT_MAX_TOOL_CALLS = 50;
-
 /** Maps a plain model id string to a provider model instance. */
 export function resolveModel(id: string) {
   if (id.startsWith("claude-")) return anthropic(id);
@@ -138,7 +136,8 @@ function toUsageBreakdown(totalUsage: TotalUsage): UsageBreakdown {
   };
 }
 
-function addUsage(a: UsageBreakdown, b: UsageBreakdown): UsageBreakdown {
+/** Sums two usage breakdowns field by field. */
+export function addUsage(a: UsageBreakdown, b: UsageBreakdown): UsageBreakdown {
   return {
     noCache: a.noCache + b.noCache,
     cacheRead: a.cacheRead + b.cacheRead,
@@ -200,7 +199,7 @@ export interface AgenticCallOptions<T> {
   prompt: string;
   schema: z.ZodType<T>;
   tools?: Parameters<typeof generateText>[0]["tools"];
-  maxToolCalls?: number;
+  maxToolCalls: number;
   tokenBudget?: number;
 }
 
@@ -214,7 +213,7 @@ export interface AgenticCallOptions<T> {
 export async function runStructured<T>(
   opts: AgenticCallOptions<T>,
 ): Promise<{ output: T; toolCalls: number; usage: UsageBreakdown }> {
-  const maxToolCalls = opts.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
+  const maxToolCalls = opts.maxToolCalls;
   const model =
     typeof opts.modelId === "string"
       ? resolveModel(opts.modelId)

@@ -8,7 +8,7 @@ Named for academia's Reviewer #2: reads everything, questions everything, approv
 
 A GitHub Action that reviews pull requests and posts the result as a normal GitHub review: inline comments, suggestion blocks where the fix is obvious, and a COMMENT or REQUEST_CHANGES verdict. It never approves, and it cannot touch your code: the token only gets contents read and pull-requests write.
 
-Before commenting it explores the repo with read-only tools, then re-checks every finding and drops the ones it cannot defend. The bias is fewer, better comments: nits fold into the review body instead of inline noise, anything a linter would catch is skipped, and each finding cites the rule it breaks.
+Before commenting it explores the repo with read-only tools, then re-checks its findings and drops the ones it cannot defend. The bias is fewer, better comments: nits fold into the review body instead of inline noise, anything a linter would catch is skipped, and each finding cites the rule it breaks.
 
 Works with any language. Conventions come from your repo, not the tool.
 

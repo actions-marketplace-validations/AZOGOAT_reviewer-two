@@ -118,7 +118,7 @@ export function planReview(
   };
 }
 
-/** Submits the review. The only write this tool ever performs is pulls.createReview. */
+/** Submits the review. Aside from main.ts's failure comment, pulls.createReview is the only write this tool performs. */
 export async function submitReview(
   octokit: Octokit,
   ref: PrRef,

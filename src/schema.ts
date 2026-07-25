@@ -36,12 +36,14 @@ export const reviewOutputSchema = z.object({
 });
 export type ReviewOutput = z.infer<typeof reviewOutputSchema>;
 
-/** Phase-2 verdict on a single candidate finding. */
+/** Phase-2 verdict on a single candidate finding. evidence comes first so the
+ * model states it before ruling; fields are emitted in schema order. */
 export const verificationSchema = z.object({
-  verdict: z.enum(["confirmed", "discarded"]),
+  // Write-only on purpose: demanding stated evidence makes the verdict more reliable.
   evidence: z
     .string()
     .describe("Concrete code evidence, or the reason for discarding"),
+  verdict: z.enum(["confirmed", "discarded"]),
   severity: z
     .enum(severities)
     .optional()

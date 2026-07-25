@@ -217,7 +217,7 @@ export async function gatherPr(
     },
     files,
     skippedFiles: [...skipped, ...omitted],
-    changedPaths: prFiles.map((f: { filename: string }) => f.filename),
+    changedPaths: prFiles.map((f) => f.filename),
   };
 }
 
