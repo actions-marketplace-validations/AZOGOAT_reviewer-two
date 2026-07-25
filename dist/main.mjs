@@ -79873,6 +79873,11 @@ function withWrapUpDemand(messages) {
   );
   return has ? messages : [...messages, { role: "user", content: WRAP_UP_DEMAND }];
 }
+function schemaRepairDemand(error52) {
+  const detail = error52.cause instanceof Error ? error52.cause.message.slice(0, 2e3) : "";
+  return "That output failed validation against the required schema. " + (detail ? `Validation errors: ${detail}
+` : "") + "Write the complete review output again, in the required format, fixing only what the schema requires.";
+}
 function dropDanglingToolCalls(messages) {
   const out = [...messages];
   while (out.length > 0) {
@@ -79895,40 +79900,78 @@ async function runStructured(opts) {
     content: opts.system,
     providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } }
   };
+  let toolCalls = 0;
+  let usage = {
+    noCache: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    output: 0
+  };
+  const trackStep = (step) => {
+    toolCalls += step.toolCalls.length;
+    usage = addUsage(usage, toUsageBreakdown(step.usage));
+  };
   let wrapUpStep;
-  const result = await generateText({
-    model,
-    providerOptions,
-    instructions,
-    messages: [{ role: "user", content: opts.prompt }],
-    tools: opts.tools,
-    // Each step re-stamps cache breakpoints. When a limit is hit the step
-    // hides the exploration tools and demands the review in a user message;
-    // the second stop condition ends the loop right after that step in case
-    // the model ignores the demand and keeps emitting tool calls.
-    prepareStep: ({ stepNumber, steps, messages }) => {
-      const wrapUp = shouldWrapUp({
-        stepNumber,
-        steps,
-        maxToolCalls,
-        tokenBudget: opts.tokenBudget
+  let result;
+  try {
+    result = await generateText({
+      model,
+      providerOptions,
+      instructions,
+      messages: [{ role: "user", content: opts.prompt }],
+      tools: opts.tools,
+      // Each step re-stamps cache breakpoints. When a limit is hit the step
+      // hides the exploration tools and demands the review in a user message;
+      // the second stop condition ends the loop right after that step in case
+      // the model ignores the demand and keeps emitting tool calls.
+      prepareStep: ({ stepNumber, steps, messages }) => {
+        const wrapUp = shouldWrapUp({
+          stepNumber,
+          steps,
+          maxToolCalls,
+          tokenBudget: opts.tokenBudget
+        });
+        if (wrapUp) wrapUpStep ??= stepNumber;
+        return {
+          messages: placeCacheBreakpoints(
+            wrapUp ? withWrapUpDemand(messages) : messages
+          ),
+          ...wrapUp ? { activeTools: [] } : {}
+        };
+      },
+      stopWhen: [
+        isStepCount(maxToolCalls + 1),
+        ({ steps }) => wrapUpStep !== void 0 && steps.length > wrapUpStep
+      ],
+      output: output_exports.object({ schema: opts.schema }),
+      onStepFinish: trackStep
+    });
+  } catch (error52) {
+    if (!NoObjectGeneratedError.isInstance(error52) || error52.text === void 0) {
+      throw error52;
+    }
+    try {
+      const repaired = await generateText({
+        model,
+        providerOptions,
+        instructions,
+        messages: placeCacheBreakpoints([
+          { role: "user", content: opts.prompt },
+          { role: "assistant", content: error52.text },
+          { role: "user", content: schemaRepairDemand(error52) }
+        ]),
+        output: output_exports.object({ schema: opts.schema }),
+        onStepFinish: trackStep
       });
-      if (wrapUp) wrapUpStep ??= stepNumber;
       return {
-        messages: placeCacheBreakpoints(
-          wrapUp ? withWrapUpDemand(messages) : messages
-        ),
-        ...wrapUp ? { activeTools: [] } : {}
+        output: opts.schema.parse(repaired.output),
+        toolCalls,
+        usage
       };
-    },
-    stopWhen: [
-      isStepCount(maxToolCalls + 1),
-      ({ steps }) => wrapUpStep !== void 0 && steps.length > wrapUpStep
-    ],
-    output: output_exports.object({ schema: opts.schema })
-  });
-  const toolCalls = result.steps.reduce((n, s) => n + s.toolCalls.length, 0);
-  let usage = toUsageBreakdown(result.usage);
+    } catch {
+      throw error52;
+    }
+  }
   if (result.finishReason !== "stop") {
     try {
       const recovery = await generateText({
@@ -79940,9 +79983,9 @@ async function runStructured(opts) {
           ...dropDanglingToolCalls(result.responseMessages),
           { role: "user", content: WRAP_UP_DEMAND }
         ]),
-        output: output_exports.object({ schema: opts.schema })
+        output: output_exports.object({ schema: opts.schema }),
+        onStepFinish: trackStep
       });
-      usage = addUsage(usage, toUsageBreakdown(recovery.usage));
       if (recovery.finishReason === "stop") {
         return {
           output: opts.schema.parse(recovery.output),
