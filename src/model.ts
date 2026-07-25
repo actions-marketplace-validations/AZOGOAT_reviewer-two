@@ -137,6 +137,47 @@ function toUsageBreakdown(totalUsage: TotalUsage): UsageBreakdown {
   };
 }
 
+function addUsage(a: UsageBreakdown, b: UsageBreakdown): UsageBreakdown {
+  return {
+    noCache: a.noCache + b.noCache,
+    cacheRead: a.cacheRead + b.cacheRead,
+    cacheWrite: a.cacheWrite + b.cacheWrite,
+    output: a.output + b.output,
+  };
+}
+
+// Hiding the tools is not enough: a model deep in an exploration loop keeps
+// calling them by name from memory, so the wrap-up must be said out loud.
+const WRAP_UP_DEMAND =
+  "Tool access is closed and no more tool calls will be answered. " +
+  "Write the final review output now, in the required format, " +
+  "using only what you have already gathered.";
+
+/** Appends the wrap-up demand unless an earlier step already added it. */
+function withWrapUpDemand(messages: ModelMessage[]): ModelMessage[] {
+  const has = messages.some(
+    (m) => m.role === "user" && m.content === WRAP_UP_DEMAND,
+  );
+  return has
+    ? messages
+    : [...messages, { role: "user", content: WRAP_UP_DEMAND }];
+}
+
+/** Drops trailing assistant tool calls that never got results; the API rejects them. */
+function dropDanglingToolCalls(messages: ModelMessage[]): ModelMessage[] {
+  const out = [...messages];
+  while (out.length > 0) {
+    const last = out[out.length - 1];
+    const parts = Array.isArray(last?.content) ? last.content : [];
+    const dangling =
+      last?.role === "assistant" &&
+      parts.some((p) => typeof p === "object" && p?.type === "tool-call");
+    if (!dangling) break;
+    out.pop();
+  }
+  return out;
+}
+
 export interface AgenticCallOptions<T> {
   modelId: string | LanguageModel;
   system: string;
@@ -151,47 +192,90 @@ export interface AgenticCallOptions<T> {
  * One agentic call with structured output. Used by phase 1 (with generous
  * budgets) and phase 2 (with small ones). The system message and, per step,
  * the prompt and latest messages carry Anthropic cache breakpoints; OpenAI
- * models ignore that provider option.
+ * models ignore that provider option. A run that still ends without output
+ * gets one tool-free recovery call before failing, so the spend is not lost.
  */
 export async function runStructured<T>(
   opts: AgenticCallOptions<T>,
 ): Promise<{ output: T; toolCalls: number; usage: UsageBreakdown }> {
   const maxToolCalls = opts.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
+  const model =
+    typeof opts.modelId === "string"
+      ? resolveModel(opts.modelId)
+      : opts.modelId;
+  const providerOptions = {
+    anthropic: { structuredOutputMode: "jsonTool" },
+  } as const;
+  const instructions = {
+    role: "system",
+    content: opts.system,
+    providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+  } as const;
+
+  let wrapUpStep: number | undefined;
   const result = await generateText({
-    model:
-      typeof opts.modelId === "string"
-        ? resolveModel(opts.modelId)
-        : opts.modelId,
-    providerOptions: { anthropic: { structuredOutputMode: "jsonTool" } },
-    instructions: {
-      role: "system",
-      content: opts.system,
-      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
-    },
+    model,
+    providerOptions,
+    instructions,
     messages: [{ role: "user", content: opts.prompt }],
     tools: opts.tools,
-    // prepareStep re-stamps cache breakpoints every step, and forces a final
-    // review-only step (exploration tools hidden) when a limit is hit;
-    // stopWhen is only a backstop one step further out
-    prepareStep: ({ stepNumber, steps, messages }) => ({
-      messages: placeCacheBreakpoints(messages),
-      ...(shouldWrapUp({
+    // Each step re-stamps cache breakpoints. When a limit is hit the step
+    // hides the exploration tools and demands the review in a user message;
+    // the second stop condition ends the loop right after that step in case
+    // the model ignores the demand and keeps emitting tool calls.
+    prepareStep: ({ stepNumber, steps, messages }) => {
+      const wrapUp = shouldWrapUp({
         stepNumber,
         steps,
         maxToolCalls,
         tokenBudget: opts.tokenBudget,
-      })
-        ? { activeTools: [] }
-        : {}),
-    }),
-    stopWhen: isStepCount(maxToolCalls + 1),
+      });
+      if (wrapUp) wrapUpStep ??= stepNumber;
+      return {
+        messages: placeCacheBreakpoints(
+          wrapUp ? withWrapUpDemand(messages) : messages,
+        ),
+        ...(wrapUp ? { activeTools: [] } : {}),
+      };
+    },
+    stopWhen: [
+      isStepCount(maxToolCalls + 1),
+      ({ steps }) => wrapUpStep !== undefined && steps.length > wrapUpStep,
+    ],
     output: Output.object({ schema: opts.schema }),
   });
-  assertFinished(result);
   const toolCalls = result.steps.reduce((n, s) => n + s.toolCalls.length, 0);
+  let usage = toUsageBreakdown(result.usage);
+
+  if (result.finishReason !== "stop") {
+    try {
+      const recovery = await generateText({
+        model,
+        providerOptions,
+        instructions,
+        messages: placeCacheBreakpoints([
+          { role: "user", content: opts.prompt },
+          ...dropDanglingToolCalls(result.responseMessages as ModelMessage[]),
+          { role: "user", content: WRAP_UP_DEMAND },
+        ]),
+        output: Output.object({ schema: opts.schema }),
+      });
+      usage = addUsage(usage, toUsageBreakdown(recovery.usage));
+      if (recovery.finishReason === "stop") {
+        return {
+          output: opts.schema.parse(recovery.output),
+          toolCalls,
+          usage,
+        };
+      }
+    } catch {
+      // fall through to the diagnostic error below
+    }
+    assertFinished(result);
+  }
   return {
     output: opts.schema.parse(result.output),
     toolCalls,
-    usage: toUsageBreakdown(result.usage),
+    usage,
   };
 }
