@@ -6,6 +6,9 @@ on:
       model:
         type: string
         default: claude-opus-4-8
+      openai_compatible_base_url:
+        type: string
+        default: ""
       reviewer_login:
         type: string
         required: true
@@ -15,6 +18,9 @@ on:
       exploration_token_budget:
         type: string
         default: "5000000"
+      context_window_tokens:
+        type: string
+        default: "200000"
       max_inline_comments:
         type: string
         default: "15"
@@ -36,6 +42,8 @@ on:
       anthropic_api_key:
         required: false
       openai_api_key:
+        required: false
+      openai_compatible_api_key:
         required: false
 
 concurrency:
@@ -62,6 +70,7 @@ jobs:
           reviewer_login: ${{ inputs.reviewer_login }}
           max_tool_calls: ${{ inputs.max_tool_calls }}
           exploration_token_budget: ${{ inputs.exploration_token_budget }}
+          context_window_tokens: ${{ inputs.context_window_tokens }}
           max_inline_comments: ${{ inputs.max_inline_comments }}
           inline_severity_threshold: ${{ inputs.inline_severity_threshold }}
           request_changes_threshold: ${{ inputs.request_changes_threshold }}
@@ -69,3 +78,5 @@ jobs:
           github_token: ${{ secrets.ai_reviewer_token }}
           anthropic_api_key: ${{ secrets.anthropic_api_key }}
           openai_api_key: ${{ secrets.openai_api_key }}
+          openai_compatible_base_url: ${{ inputs.openai_compatible_base_url }}
+          openai_compatible_api_key: ${{ secrets.openai_compatible_api_key }}

@@ -1,15 +1,18 @@
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai } from "@ai-sdk/openai";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import {
   generateText,
   isStepCount,
   type LanguageModel,
+  type LanguageModelMiddleware,
   type ModelMessage,
   NoObjectGeneratedError,
   Output,
   tool,
+  wrapLanguageModel,
 } from "ai";
-import type { z } from "zod";
+import { z } from "zod";
 
 export { tool as defineTool };
 
@@ -17,9 +20,42 @@ export { tool as defineTool };
 export function resolveModel(id: string) {
   if (id.startsWith("claude-")) return anthropic(id);
   if (id.startsWith("gpt-") || /^o\d/.test(id)) return openai(id);
+  if (id.includes("/")) return openAiCompatibleModel(id);
   throw new Error(
-    `Unsupported model "${id}". Use a claude-* id (Anthropic) or a gpt-*/o* id (OpenAI).`,
+    `Unsupported model "${id}". Use a claude-* id (Anthropic), a gpt-*/o* id ` +
+      `(OpenAI), or an org/model id served by an OpenAI-compatible endpoint.`,
   );
+}
+
+/**
+ * vLLM-style servers enforce response_format as a decoding grammar over the
+ * whole completion, where it would block tool calls. Sent only on tool-free
+ * requests, it constrains exactly the final review text to the schema.
+ */
+export const responseFormatOnlyWithoutTools: LanguageModelMiddleware = {
+  transformParams: async ({ params }) =>
+    params.tools?.length ? { ...params, responseFormat: undefined } : params,
+};
+
+/** org/model ids resolve against the endpoint configured via action inputs. */
+function openAiCompatibleModel(id: string) {
+  const baseURL = process.env.OPENAI_COMPATIBLE_BASE_URL;
+  if (!baseURL) {
+    throw new Error(
+      `Model "${id}" is served by an OpenAI-compatible endpoint, but none is ` +
+        `configured. Set the openai_compatible_base_url input.`,
+    );
+  }
+  const model = createOpenAICompatible({
+    name: "openai-compatible",
+    baseURL,
+    apiKey: process.env.OPENAI_COMPATIBLE_API_KEY,
+    supportsStructuredOutputs: true,
+  })(id);
+  return wrapLanguageModel({
+    model,
+    middleware: responseFormatOnlyWithoutTools,
+  });
 }
 
 interface UsageStep {
@@ -38,8 +74,8 @@ export function exceedsTokenBudget(budget?: number) {
   };
 }
 
-// Leaves headroom under the model's ~200k window for the wrap-up step.
-const CONTEXT_WRAP_UP_TOKENS = 150_000;
+// Kept free under the context window for the wrap-up step.
+const WRAP_UP_HEADROOM_TOKENS = 50_000;
 
 /**
  * True when the next step must stop exploring and write the review: the step
@@ -51,11 +87,15 @@ export function shouldWrapUp(opts: {
   steps: UsageStep[];
   maxToolCalls: number;
   tokenBudget?: number;
+  contextWindowTokens: number;
 }): boolean {
   if (opts.stepNumber >= opts.maxToolCalls - 1) return true;
   if (exceedsTokenBudget(opts.tokenBudget)({ steps: opts.steps })) return true;
   const last = opts.steps[opts.steps.length - 1];
-  return (last?.usage.totalTokens ?? 0) >= CONTEXT_WRAP_UP_TOKENS;
+  return (
+    (last?.usage.totalTokens ?? 0) >=
+    opts.contextWindowTokens - WRAP_UP_HEADROOM_TOKENS
+  );
 }
 
 /**
@@ -193,6 +233,19 @@ function dropDanglingToolCalls(messages: ModelMessage[]): ModelMessage[] {
   return out;
 }
 
+/**
+ * The output schema as prompt text, for endpoints that enforce the schema
+ * only as a server-side grammar the model never gets to read.
+ */
+export function schemaAsPromptText(schema: z.ZodType): string {
+  return (
+    "When you write the final output, reply with a single JSON object " +
+    "matching this JSON schema, with no code fences and no text before or " +
+    "after it:\n" +
+    JSON.stringify(z.toJSONSchema(schema))
+  );
+}
+
 export interface AgenticCallOptions<T> {
   modelId: string | LanguageModel;
   system: string;
@@ -201,6 +254,7 @@ export interface AgenticCallOptions<T> {
   tools?: Parameters<typeof generateText>[0]["tools"];
   maxToolCalls: number;
   tokenBudget?: number;
+  contextWindowTokens: number;
 }
 
 /**
@@ -221,9 +275,13 @@ export async function runStructured<T>(
   const providerOptions = {
     anthropic: { structuredOutputMode: "jsonTool" },
   } as const;
+  const system =
+    typeof opts.modelId === "string" && opts.modelId.includes("/")
+      ? `${opts.system}\n\n${schemaAsPromptText(opts.schema)}`
+      : opts.system;
   const instructions = {
     role: "system",
-    content: opts.system,
+    content: system,
     providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
   } as const;
 
@@ -260,6 +318,7 @@ export async function runStructured<T>(
           steps,
           maxToolCalls,
           tokenBudget: opts.tokenBudget,
+          contextWindowTokens: opts.contextWindowTokens,
         });
         if (wrapUp) wrapUpStep ??= stepNumber;
         return {

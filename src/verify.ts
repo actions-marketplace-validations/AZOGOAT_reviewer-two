@@ -20,6 +20,7 @@ export async function verifyFindings(opts: {
   system: string;
   findings: Finding[];
   tools: ReturnType<typeof makeExploreTools>;
+  contextWindowTokens: number;
 }): Promise<{ findings: Finding[]; usage: UsageBreakdown; skipped: number }> {
   const confirmed: Finding[] = [];
   let usage: UsageBreakdown = {
@@ -42,6 +43,7 @@ export async function verifyFindings(opts: {
         schema: verificationSchema,
         tools: opts.tools,
         maxToolCalls: VERIFY_TOOL_CALLS,
+        contextWindowTokens: opts.contextWindowTokens,
       });
       usage = addUsage(usage, callUsage);
       if (output.verdict === "confirmed") {

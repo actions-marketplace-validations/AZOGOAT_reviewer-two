@@ -114,20 +114,21 @@ Only rule files matching the PR's changed paths are loaded.
 
 | Input | Default | Purpose |
 | --- | --- | --- |
-| model | claude-opus-4-8 | Any claude-* or gpt-*/o* model id |
+| model | claude-opus-4-8 | Any claude-* or gpt-*/o* model id, or an org/model id from an OpenAI-compatible endpoint |
 | max_tool_calls | 50 | Exploration cap; a runaway guard, raise it for large repos |
 | exploration_token_budget | 5000000 | Total token cap; when spent, the review wraps up early with what it has found |
+| context_window_tokens | 200000 | Context window of the model; exploration wraps up 50k tokens before it fills |
 | max_inline_comments | 15 | Extra findings collapse into the review body |
 | inline_severity_threshold | minor | Minimum severity posted inline; nits never post inline |
 | request_changes_threshold | major | Minimum severity for a REQUEST_CHANGES verdict |
 | reviewer_login | unset | Login of your machine account; required for team mode |
 | dry_run | false | Log the review instead of posting it |
 
-`github_token`, `anthropic_api_key`, `openai_api_key`, and `pull_number` appear in the examples above; see [action.yml](action.yml) for details.
+`github_token`, `anthropic_api_key`, `openai_api_key`, `openai_compatible_base_url`, `openai_compatible_api_key`, and `pull_number` appear in the examples above; see [action.yml](action.yml) for details.
 
 ## Model and cost
 
-The default is the strongest Claude model because review quality is the whole point; a deep review of a mid-size PR lands around 1 to 3 USD. Any repo can set a cheaper `model`. GPT models need only the model id and an `openai_api_key` secret; there are no separate code paths.
+The default is the strongest Claude model because review quality is the whole point; a deep review of a mid-size PR lands around 1 to 3 USD. Any repo can set a cheaper `model`. GPT models need only the model id and an `openai_api_key` secret; there are no separate code paths. Self-hosted or third-party OpenAI-compatible servers (vLLM and friends) work the same way: use the model id the server exposes (they look like org/model), point `openai_compatible_base_url` at its `/v1` URL, and put its key in `openai_compatible_api_key`.
 
 ## Contributing
 

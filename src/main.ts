@@ -27,6 +27,7 @@ export interface Inputs {
   model: string;
   maxToolCalls: number;
   explorationTokenBudget: number;
+  contextWindowTokens: number;
   maxInlineComments: number;
   inlineSeverityThreshold: Severity;
   requestChangesThreshold: Severity;
@@ -82,6 +83,7 @@ export function readInputs(): Inputs {
       "exploration_token_budget",
       DEFAULT_TOKEN_BUDGET,
     ),
+    contextWindowTokens: numberInput("context_window_tokens", 200_000),
     maxInlineComments: numberInput("max_inline_comments", 15),
     inlineSeverityThreshold: severityInput(
       "inline_severity_threshold",
@@ -126,11 +128,16 @@ export function shouldSkip(
   return null;
 }
 
-function exportApiKeys(): void {
+/** Copies credential inputs into the env vars the model providers read. */
+export function exportApiKeys(): void {
   const anthropicKey = core.getInput("anthropic_api_key");
   if (anthropicKey) process.env.ANTHROPIC_API_KEY = anthropicKey;
   const openaiKey = core.getInput("openai_api_key");
   if (openaiKey) process.env.OPENAI_API_KEY = openaiKey;
+  const compatBaseUrl = core.getInput("openai_compatible_base_url");
+  if (compatBaseUrl) process.env.OPENAI_COMPATIBLE_BASE_URL = compatBaseUrl;
+  const compatKey = core.getInput("openai_compatible_api_key");
+  if (compatKey) process.env.OPENAI_COMPATIBLE_API_KEY = compatKey;
 }
 
 async function postFailureComment(octokit: Octokit, ref: PrRef): Promise<void> {
@@ -227,6 +234,7 @@ export async function run(): Promise<void> {
       tools,
       maxToolCalls: inputs.maxToolCalls,
       tokenBudget: inputs.explorationTokenBudget,
+      contextWindowTokens: inputs.contextWindowTokens,
     });
     core.info(
       `Phase 1 done: ${phase1.output.findings.length} candidate findings, ${phase1.toolCalls} tool calls`,
@@ -241,6 +249,7 @@ export async function run(): Promise<void> {
       system,
       findings: fresh,
       tools,
+      contextWindowTokens: inputs.contextWindowTokens,
     });
     const confirmed = phase2.findings;
     if (phase2.skipped > 0) {
