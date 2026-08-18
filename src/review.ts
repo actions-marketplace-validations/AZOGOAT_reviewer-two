@@ -46,18 +46,31 @@ function renderBodyLine(f: Finding): string {
   return `- \`${f.path}:${f.line}\` (${f.severity}, ${f.ruleRef}) ${f.comment}`;
 }
 
-/** Closing body line: files covered, tool calls, and phase-2 discards. */
+/** Closing body line: files covered and tool calls spent. */
 function renderFootnote(
   reviewedFiles: number,
   totalFiles: number,
-  stats: { toolCalls: number; discarded: number },
+  stats: { toolCalls: number },
 ): string {
   const files = `${reviewedFiles} of ${totalFiles} changed ${totalFiles === 1 ? "file" : "files"}`;
-  const discarded =
-    stats.discarded > 0
-      ? `; ${stats.discarded} candidate ${stats.discarded === 1 ? "finding" : "findings"} did not survive verification`
-      : "";
-  return `_Reviewed ${files} with ${stats.toolCalls} tool calls${discarded}._`;
+  return `_Reviewed ${files} with ${stats.toolCalls} tool calls._`;
+}
+
+/** Collapsed section listing what verification threw out, and why. */
+function renderDiscardedSection(
+  discarded: { finding: Finding; evidence: string }[],
+): string {
+  return [
+    "<details>",
+    `<summary>Discarded by verification (${discarded.length})</summary>`,
+    "",
+    ...discarded.map(
+      (d) =>
+        `${renderBodyLine(d.finding)}\n  _Discarded: ${d.evidence.replace(/\s*\n\s*/g, " ")}_`,
+    ),
+    "",
+    "</details>",
+  ].join("\n");
 }
 
 /**
@@ -73,7 +86,8 @@ export function planReview(
     inlineSeverityThreshold: Severity;
     requestChangesThreshold: Severity;
     skippedFiles: string[];
-    stats: { toolCalls: number; discarded: number };
+    stats: { toolCalls: number };
+    discarded: { finding: Finding; evidence: string }[];
   },
 ): ReviewPlan {
   const anchorable = new Map(files.map((f) => [f.path, f.commentableLines]));
@@ -108,6 +122,9 @@ export function planReview(
         "</details>",
       ].join("\n"),
     );
+  }
+  if (opts.discarded.length > 0) {
+    bodyParts.push(renderDiscardedSection(opts.discarded));
   }
   if (opts.skippedFiles.length > 0) {
     bodyParts.push(

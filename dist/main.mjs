@@ -85302,8 +85302,20 @@ function renderBodyLine(f) {
 }
 function renderFootnote(reviewedFiles, totalFiles, stats) {
   const files = `${reviewedFiles} of ${totalFiles} changed ${totalFiles === 1 ? "file" : "files"}`;
-  const discarded = stats.discarded > 0 ? `; ${stats.discarded} candidate ${stats.discarded === 1 ? "finding" : "findings"} did not survive verification` : "";
-  return `_Reviewed ${files} with ${stats.toolCalls} tool calls${discarded}._`;
+  return `_Reviewed ${files} with ${stats.toolCalls} tool calls._`;
+}
+function renderDiscardedSection(discarded) {
+  return [
+    "<details>",
+    `<summary>Discarded by verification (${discarded.length})</summary>`,
+    "",
+    ...discarded.map(
+      (d) => `${renderBodyLine(d.finding)}
+  _Discarded: ${d.evidence.replace(/\s*\n\s*/g, " ")}_`
+    ),
+    "",
+    "</details>"
+  ].join("\n");
 }
 function planReview(output, files, opts) {
   const anchorable = new Map(files.map((f) => [f.path, f.commentableLines]));
@@ -85333,6 +85345,9 @@ function planReview(output, files, opts) {
         "</details>"
       ].join("\n")
     );
+  }
+  if (opts.discarded.length > 0) {
+    bodyParts.push(renderDiscardedSection(opts.discarded));
   }
   if (opts.skippedFiles.length > 0) {
     bodyParts.push(
@@ -85759,10 +85774,8 @@ async function run() {
         inlineSeverityThreshold: inputs.inlineSeverityThreshold,
         requestChangesThreshold: inputs.requestChangesThreshold,
         skippedFiles: pr.skippedFiles,
-        stats: {
-          toolCalls: phase1.toolCalls,
-          discarded: phase2.discarded.length
-        }
+        stats: { toolCalls: phase1.toolCalls },
+        discarded: phase2.discarded
       }
     );
     if (inputs.dryRun) {

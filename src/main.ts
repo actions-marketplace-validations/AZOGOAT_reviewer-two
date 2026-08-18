@@ -274,10 +274,8 @@ export async function run(): Promise<void> {
         inlineSeverityThreshold: inputs.inlineSeverityThreshold,
         requestChangesThreshold: inputs.requestChangesThreshold,
         skippedFiles: pr.skippedFiles,
-        stats: {
-          toolCalls: phase1.toolCalls,
-          discarded: phase2.discarded.length,
-        },
+        stats: { toolCalls: phase1.toolCalls },
+        discarded: phase2.discarded,
       },
     );
 
