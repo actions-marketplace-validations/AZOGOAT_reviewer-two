@@ -31,7 +31,11 @@ export type Finding = z.infer<typeof findingSchema>;
 
 /** Structured output contract of the review phases. */
 export const reviewOutputSchema = z.object({
-  summary: z.string().describe("Two to four sentence overall assessment"),
+  summary: z
+    .string()
+    .describe(
+      "One or two sentence verdict; never a description of the change itself",
+    ),
   findings: z.array(findingSchema),
 });
 export type ReviewOutput = z.infer<typeof reviewOutputSchema>;

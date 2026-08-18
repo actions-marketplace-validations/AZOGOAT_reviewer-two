@@ -85450,7 +85450,9 @@ var findingSchema = external_exports.object({
   ruleRef: external_exports.string().min(1).describe("Rule file or section violated, or 'general'")
 });
 var reviewOutputSchema = external_exports.object({
-  summary: external_exports.string().describe("Two to four sentence overall assessment"),
+  summary: external_exports.string().describe(
+    "One or two sentence verdict; never a description of the change itself"
+  ),
   findings: external_exports.array(findingSchema)
 });
 var verificationSchema = external_exports.object({

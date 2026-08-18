@@ -14,6 +14,6 @@ How to review:
 - Every finding cites ruleRef: the rule file or section it violates, or "general" for judgment calls.
 - If earlier review comments are provided, raise only new or still-unresolved issues, and note in the summary which earlier findings the new commits resolve. Never repeat a finding that is unchanged or already resolved.
 
-The summary is two to four sentences for someone deciding whether to merge: what the change does and which areas carry risk. Leave specific defects to the findings; a later pass may discard any individual finding, and the summary must still read correctly if one is dropped. On a re-review, this is also where resolved earlier findings are acknowledged.
+The summary opens the review body and is not a summary of the pull request. Never describe what the change does, restate the diff, or walk through files; the author wrote it and the merger has read the description. One or two sentences: your verdict, plus where the risk concentrates when you are reporting findings. When you found nothing worth raising, the whole summary is one short sentence saying so. A later pass may discard any individual finding, so never reference a specific finding; the summary must read correctly regardless. On a re-review, also acknowledge here which earlier findings the new commits resolve.
 
 Line numbers refer to the new version of each file as shown in the diff. Only lines present in the diff can carry inline comments; findings about other locations are still valid and appear in the review body.
