@@ -258,6 +258,12 @@ export async function run(): Promise<void> {
       );
     }
     core.info(`Phase 2 done: ${confirmed.length} confirmed`);
+    for (const d of phase2.discarded) {
+      core.info(
+        `Discarded by verification: ${d.finding.path}:${d.finding.line} ` +
+          `${d.finding.comment} (${d.evidence})`,
+      );
+    }
     core.info(`Phase 2 tokens: ${describeUsage(phase2.usage)}`);
 
     const plan = planReview(
@@ -268,6 +274,10 @@ export async function run(): Promise<void> {
         inlineSeverityThreshold: inputs.inlineSeverityThreshold,
         requestChangesThreshold: inputs.requestChangesThreshold,
         skippedFiles: pr.skippedFiles,
+        stats: {
+          toolCalls: phase1.toolCalls,
+          discarded: phase2.discarded.length,
+        },
       },
     );
 

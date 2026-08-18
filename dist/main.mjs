@@ -85300,6 +85300,11 @@ _${f.severity} | ${f.ruleRef}_${suggestion}`;
 function renderBodyLine(f) {
   return `- \`${f.path}:${f.line}\` (${f.severity}, ${f.ruleRef}) ${f.comment}`;
 }
+function renderFootnote(reviewedFiles, totalFiles, stats) {
+  const files = `${reviewedFiles} of ${totalFiles} changed ${totalFiles === 1 ? "file" : "files"}`;
+  const discarded = stats.discarded > 0 ? `; ${stats.discarded} candidate ${stats.discarded === 1 ? "finding" : "findings"} did not survive verification` : "";
+  return `_Reviewed ${files} with ${stats.toolCalls} tool calls${discarded}._`;
+}
 function planReview(output, files, opts) {
   const anchorable = new Map(files.map((f) => [f.path, f.commentableLines]));
   const inlineEligible = [];
@@ -85334,6 +85339,13 @@ function planReview(output, files, opts) {
       `Note: these files were too large to include in the review context and were only explored on demand: ${opts.skippedFiles.map((f) => `\`${f}\``).join(", ")}.`
     );
   }
+  bodyParts.push(
+    renderFootnote(
+      files.length,
+      files.length + opts.skippedFiles.length,
+      opts.stats
+    )
+  );
   const event = output.findings.some(
     (f) => meetsThreshold(f.severity, opts.requestChangesThreshold)
   ) ? "REQUEST_CHANGES" : "COMMENT";
@@ -85469,6 +85481,7 @@ var VERIFY_TOOL_CALLS = 10;
 var MAX_VERIFIED_FINDINGS = 20;
 async function verifyFindings(opts) {
   const confirmed = [];
+  const discarded = [];
   let usage = {
     noCache: 0,
     cacheRead: 0,
@@ -85495,6 +85508,8 @@ async function verifyFindings(opts) {
           ...finding,
           severity: output.severity ?? finding.severity
         });
+      } else {
+        discarded.push({ finding, evidence: output.evidence });
       }
     } catch {
       confirmed.push(finding);
@@ -85502,6 +85517,7 @@ async function verifyFindings(opts) {
   }
   return {
     findings: confirmed,
+    discarded,
     usage,
     skipped: opts.findings.length - selected.length
   };
@@ -85729,6 +85745,11 @@ async function run() {
       );
     }
     info(`Phase 2 done: ${confirmed.length} confirmed`);
+    for (const d of phase2.discarded) {
+      info(
+        `Discarded by verification: ${d.finding.path}:${d.finding.line} ${d.finding.comment} (${d.evidence})`
+      );
+    }
     info(`Phase 2 tokens: ${describeUsage(phase2.usage)}`);
     const plan = planReview(
       { summary: phase1.output.summary, findings: confirmed },
@@ -85737,7 +85758,11 @@ async function run() {
         maxInlineComments: inputs.maxInlineComments,
         inlineSeverityThreshold: inputs.inlineSeverityThreshold,
         requestChangesThreshold: inputs.requestChangesThreshold,
-        skippedFiles: pr.skippedFiles
+        skippedFiles: pr.skippedFiles,
+        stats: {
+          toolCalls: phase1.toolCalls,
+          discarded: phase2.discarded.length
+        }
       }
     );
     if (inputs.dryRun) {

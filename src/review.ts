@@ -46,6 +46,20 @@ function renderBodyLine(f: Finding): string {
   return `- \`${f.path}:${f.line}\` (${f.severity}, ${f.ruleRef}) ${f.comment}`;
 }
 
+/** Closing body line: files covered, tool calls, and phase-2 discards. */
+function renderFootnote(
+  reviewedFiles: number,
+  totalFiles: number,
+  stats: { toolCalls: number; discarded: number },
+): string {
+  const files = `${reviewedFiles} of ${totalFiles} changed ${totalFiles === 1 ? "file" : "files"}`;
+  const discarded =
+    stats.discarded > 0
+      ? `; ${stats.discarded} candidate ${stats.discarded === 1 ? "finding" : "findings"} did not survive verification`
+      : "";
+  return `_Reviewed ${files} with ${stats.toolCalls} tool calls${discarded}._`;
+}
+
 /**
  * Turns verified findings into one review: inline comments for anchored
  * findings above the threshold (capped, highest severity first), everything
@@ -59,6 +73,7 @@ export function planReview(
     inlineSeverityThreshold: Severity;
     requestChangesThreshold: Severity;
     skippedFiles: string[];
+    stats: { toolCalls: number; discarded: number };
   },
 ): ReviewPlan {
   const anchorable = new Map(files.map((f) => [f.path, f.commentableLines]));
@@ -99,6 +114,13 @@ export function planReview(
       `Note: these files were too large to include in the review context and were only explored on demand: ${opts.skippedFiles.map((f) => `\`${f}\``).join(", ")}.`,
     );
   }
+  bodyParts.push(
+    renderFootnote(
+      files.length,
+      files.length + opts.skippedFiles.length,
+      opts.stats,
+    ),
+  );
 
   const event = output.findings.some((f) =>
     meetsThreshold(f.severity, opts.requestChangesThreshold),

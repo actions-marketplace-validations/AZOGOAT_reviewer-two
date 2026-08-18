@@ -13,6 +13,7 @@ const MAX_VERIFIED_FINDINGS = 20;
  * At most MAX_VERIFIED_FINDINGS are verified, most severe first, so a noisy
  * phase 1 cannot run the job into its timeout; the overflow is dropped and
  * counted in skipped, never posted unverified.
+ * Discarded findings come back with the model's evidence, for the run log.
  * usage sums the phase's calls; a failed call contributes nothing.
  */
 export async function verifyFindings(opts: {
@@ -21,8 +22,14 @@ export async function verifyFindings(opts: {
   findings: Finding[];
   tools: ReturnType<typeof makeExploreTools>;
   contextWindowTokens: number;
-}): Promise<{ findings: Finding[]; usage: UsageBreakdown; skipped: number }> {
+}): Promise<{
+  findings: Finding[];
+  discarded: { finding: Finding; evidence: string }[];
+  usage: UsageBreakdown;
+  skipped: number;
+}> {
   const confirmed: Finding[] = [];
+  const discarded: { finding: Finding; evidence: string }[] = [];
   let usage: UsageBreakdown = {
     noCache: 0,
     cacheRead: 0,
@@ -51,6 +58,8 @@ export async function verifyFindings(opts: {
           ...finding,
           severity: output.severity ?? finding.severity,
         });
+      } else {
+        discarded.push({ finding, evidence: output.evidence });
       }
     } catch {
       confirmed.push(finding);
@@ -58,6 +67,7 @@ export async function verifyFindings(opts: {
   }
   return {
     findings: confirmed,
+    discarded,
     usage,
     skipped: opts.findings.length - selected.length,
   };
