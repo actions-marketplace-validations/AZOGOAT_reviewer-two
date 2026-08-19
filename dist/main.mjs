@@ -83270,7 +83270,7 @@ async function generateText({
                 (_b25 = prepareStepResult == null ? void 0 : prepareStepResult.model) != null ? _b25 : model
               );
               const stepInstructions = (_d2 = (_c2 = prepareStepResult == null ? void 0 : prepareStepResult.instructions) != null ? _c2 : prepareStepResult == null ? void 0 : prepareStepResult.system) != null ? _d2 : instructionsForNextStep;
-              const promptMessages = await convertToLanguageModelPrompt({
+              const promptMessages2 = await convertToLanguageModelPrompt({
                 prompt: {
                   instructions: stepInstructions,
                   messages: (_e = prepareStepResult == null ? void 0 : prepareStepResult.messages) != null ? _e : stepInputMessages
@@ -83317,7 +83317,7 @@ async function generateText({
                   providerOptions: stepProviderOptions,
                   output,
                   runtimeContext,
-                  promptMessages,
+                  promptMessages: promptMessages2,
                   stepTools,
                   stepToolChoice,
                   toolsContext
@@ -83358,7 +83358,7 @@ async function generateText({
                       tools: stepTools,
                       toolChoice: stepToolChoice,
                       responseFormat: await (output == null ? void 0 : output.responseFormat),
-                      prompt: promptMessages,
+                      prompt: promptMessages2,
                       providerOptions: stepProviderOptions,
                       abortSignal: mergedAbortSignal,
                       headers: headersWithUserAgent
@@ -84806,6 +84806,10 @@ function dropDanglingToolCalls(messages) {
 function schemaAsPromptText(schema) {
   return "When you write the final output, reply with a single JSON object matching this JSON schema, with no code fences and no text before or after it:\n" + JSON.stringify(external_exports.toJSONSchema(schema));
 }
+function promptMessages(prompt) {
+  const parts = typeof prompt === "string" ? [prompt] : prompt;
+  return parts.map((content) => ({ role: "user", content }));
+}
 async function runStructured(opts) {
   const maxToolCalls = opts.maxToolCalls;
   const model = typeof opts.modelId === "string" ? resolveModel(opts.modelId) : opts.modelId;
@@ -84838,7 +84842,7 @@ ${schemaAsPromptText(opts.schema)}` : opts.system;
       model,
       providerOptions,
       instructions,
-      messages: [{ role: "user", content: opts.prompt }],
+      messages: promptMessages(opts.prompt),
       tools: opts.tools,
       // Each step re-stamps cache breakpoints. When a limit is hit the step
       // hides the exploration tools and demands the review in a user message;
@@ -84877,7 +84881,7 @@ ${schemaAsPromptText(opts.schema)}` : opts.system;
         providerOptions,
         instructions,
         messages: placeCacheBreakpoints([
-          { role: "user", content: opts.prompt },
+          ...promptMessages(opts.prompt),
           { role: "assistant", content: error52.text },
           { role: "user", content: schemaRepairDemand(error52) }
         ]),
@@ -84900,7 +84904,7 @@ ${schemaAsPromptText(opts.schema)}` : opts.system;
         providerOptions,
         instructions,
         messages: placeCacheBreakpoints([
-          { role: "user", content: opts.prompt },
+          ...promptMessages(opts.prompt),
           ...dropDanglingToolCalls(result.responseMessages),
           { role: "user", content: WRAP_UP_DEMAND }
         ]),

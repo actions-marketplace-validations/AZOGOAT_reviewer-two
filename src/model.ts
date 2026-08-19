@@ -246,10 +246,16 @@ export function schemaAsPromptText(schema: z.ZodType): string {
   );
 }
 
+/** The user prompt as messages, one per part; a shared first part stays a cacheable prefix. */
+function promptMessages(prompt: string | string[]): ModelMessage[] {
+  const parts = typeof prompt === "string" ? [prompt] : prompt;
+  return parts.map((content) => ({ role: "user", content }) as ModelMessage);
+}
+
 export interface AgenticCallOptions<T> {
   modelId: string | LanguageModel;
   system: string;
-  prompt: string;
+  prompt: string | string[];
   schema: z.ZodType<T>;
   tools?: Parameters<typeof generateText>[0]["tools"];
   maxToolCalls: number;
@@ -306,7 +312,7 @@ export async function runStructured<T>(
       model,
       providerOptions,
       instructions,
-      messages: [{ role: "user", content: opts.prompt }],
+      messages: promptMessages(opts.prompt),
       tools: opts.tools,
       // Each step re-stamps cache breakpoints. When a limit is hit the step
       // hides the exploration tools and demands the review in a user message;
@@ -347,7 +353,7 @@ export async function runStructured<T>(
         providerOptions,
         instructions,
         messages: placeCacheBreakpoints([
-          { role: "user", content: opts.prompt },
+          ...promptMessages(opts.prompt),
           { role: "assistant", content: error.text },
           { role: "user", content: schemaRepairDemand(error) },
         ]),
@@ -371,7 +377,7 @@ export async function runStructured<T>(
         providerOptions,
         instructions,
         messages: placeCacheBreakpoints([
-          { role: "user", content: opts.prompt },
+          ...promptMessages(opts.prompt),
           ...dropDanglingToolCalls(result.responseMessages as ModelMessage[]),
           { role: "user", content: WRAP_UP_DEMAND },
         ]),
