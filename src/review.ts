@@ -1,5 +1,10 @@
-import type { FileDiff, Octokit, PreviousComment, PrRef } from "./context.js";
-import type { Finding, ReviewOutput, Severity } from "./schema.js";
+import type { FileDiff, Octokit, PreviousThread, PrRef } from "./context.js";
+import {
+  type Finding,
+  type ReviewOutput,
+  type Severity,
+  severities,
+} from "./schema.js";
 
 const RANKS: Record<Severity, number> = {
   critical: 3,
@@ -18,15 +23,54 @@ export function meetsThreshold(s: Severity, threshold: Severity): boolean {
   return RANKS[s] >= RANKS[threshold];
 }
 
-/** Drops findings already raised at the same path and line in an earlier AI review. */
+const TRAILER = new RegExp(`^_(${severities.join("|")}) \\| (.+)_$`, "gm");
+
+/** Reads severity and ruleRef back from a body written by renderFindingBody. */
+export function parseFindingTrailer(
+  body: string,
+): { severity: Severity; ruleRef: string } | null {
+  const last = [...body.matchAll(TRAILER)].at(-1);
+  if (!last) return null;
+  return { severity: last[1] as Severity, ruleRef: last[2] as string };
+}
+
+export type ThreadStatus = "open" | "closed";
+
+/** open: nobody replied or resolved it and the finding meets the request-changes threshold. closed: anything else. */
+export function threadStatus(
+  thread: PreviousThread,
+  requestChangesThreshold: Severity,
+): ThreadStatus {
+  if (thread.resolved || thread.replies.length > 0) return "closed";
+  const trailer = parseFindingTrailer(thread.body);
+  if (!trailer) return "closed";
+  return meetsThreshold(trailer.severity, requestChangesThreshold)
+    ? "open"
+    : "closed";
+}
+
+/** Splits findings on whether a closed earlier thread sits at their path and line. */
 export function dedupeAgainstPrevious(
   findings: Finding[],
-  previous: PreviousComment[],
-): Finding[] {
+  previous: PreviousThread[],
+  requestChangesThreshold: Severity,
+): { fresh: Finding[]; sameLine: Finding[] } {
   const seen = new Set(
-    previous.filter((p) => p.line !== null).map((p) => `${p.path}:${p.line}`),
+    previous
+      .filter(
+        (p) =>
+          p.line !== null &&
+          threadStatus(p, requestChangesThreshold) === "closed",
+      )
+      .map((p) => `${p.path}:${p.line}`),
   );
-  return findings.filter((f) => !seen.has(`${f.path}:${f.line}`));
+  const fresh: Finding[] = [];
+  const sameLine: Finding[] = [];
+  for (const f of findings) {
+    if (seen.has(`${f.path}:${f.line}`)) sameLine.push(f);
+    else fresh.push(f);
+  }
+  return { fresh, sameLine };
 }
 
 export interface ReviewPlan {

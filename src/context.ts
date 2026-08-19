@@ -1,5 +1,7 @@
+import * as core from "@actions/core";
 import type { getOctokit } from "@actions/github";
 import picomatch from "picomatch";
+import { parseFindingTrailer } from "./review.js";
 
 export type Octokit = ReturnType<typeof getOctokit>;
 
@@ -24,10 +26,19 @@ export interface PrContext {
   changedPaths: string[];
 }
 
-export interface PreviousComment {
+/**
+ * One inline comment the reviewer posted in an earlier round, with the human
+ * replies under it. line is the position in the current head, null once the
+ * anchored code changed; originalLine is where it was posted. resolved is the
+ * conversation state on GitHub.
+ */
+export interface PreviousThread {
   path: string;
   line: number | null;
+  originalLine: number | null;
   body: string;
+  resolved: boolean;
+  replies: { author: string; body: string }[];
 }
 
 export interface PrRef {
@@ -221,23 +232,110 @@ export async function gatherPr(
   };
 }
 
-/** Fetches earlier inline review comments posted by the reviewer identities. */
-export async function fetchPreviousAiComments(
+interface ReviewThreadsPage {
+  repository: {
+    pullRequest: {
+      reviewThreads: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        nodes: {
+          isResolved: boolean;
+          comments: { nodes: { databaseId: number | null }[] };
+        }[];
+      };
+    };
+  };
+}
+
+const RESOLVED_THREADS_QUERY = `
+  query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+    repository(owner: $owner, name: $repo) {
+      pullRequest(number: $number) {
+        reviewThreads(first: 100, after: $cursor) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            isResolved
+            comments(first: 1) { nodes { databaseId } }
+          }
+        }
+      }
+    }
+  }`;
+
+/** Ids of the root comments whose conversation is resolved. Empty when the query is unavailable. */
+async function fetchResolvedRootIds(
+  octokit: Octokit,
+  ref: PrRef,
+): Promise<Set<number>> {
+  const resolved = new Set<number>();
+  let cursor: string | null = null;
+  try {
+    for (;;) {
+      const page: ReviewThreadsPage = await octokit.graphql(
+        RESOLVED_THREADS_QUERY,
+        {
+          owner: ref.owner,
+          repo: ref.repo,
+          number: ref.pullNumber,
+          cursor,
+        },
+      );
+      const { nodes, pageInfo } = page.repository.pullRequest.reviewThreads;
+      for (const node of nodes) {
+        const rootId = node.comments.nodes[0]?.databaseId;
+        if (node.isResolved && rootId) resolved.add(rootId);
+      }
+      if (!pageInfo.hasNextPage || !pageInfo.endCursor) break;
+      cursor = pageInfo.endCursor;
+    }
+  } catch (err) {
+    core.warning(
+      `Could not read resolved conversations, treating every thread as unresolved: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return new Set();
+  }
+  return resolved;
+}
+
+/**
+ * Fetches the reviewer's own earlier inline comments as threads, with the
+ * human replies under each and the conversation's resolved state. Roots are
+ * the ones carrying the finding trailer.
+ */
+export async function fetchPreviousThreads(
   octokit: Octokit,
   ref: PrRef,
   botLogins: string[],
-): Promise<PreviousComment[]> {
-  const comments = await octokit.paginate(
-    octokit.rest.pulls.listReviewComments,
-    {
+): Promise<PreviousThread[]> {
+  const [comments, resolvedRoots] = await Promise.all([
+    octokit.paginate(octokit.rest.pulls.listReviewComments, {
       owner: ref.owner,
       repo: ref.repo,
       pull_number: ref.pullNumber,
       per_page: 100,
-    },
-  );
+    }),
+    fetchResolvedRootIds(octokit, ref),
+  ]);
   const logins = new Set(botLogins);
-  return comments
-    .filter((c) => c.user && logins.has(c.user.login))
-    .map((c) => ({ path: c.path, line: c.line ?? null, body: c.body }));
+  const isBot = (c: { user: { login: string } | null }) =>
+    c.user !== null && logins.has(c.user.login);
+  const roots = new Map<number, PreviousThread>();
+  for (const c of comments) {
+    if (c.in_reply_to_id || !isBot(c) || !parseFindingTrailer(c.body)) continue;
+    roots.set(c.id, {
+      path: c.path,
+      line: c.line ?? null,
+      originalLine: c.original_line ?? null,
+      body: c.body,
+      resolved: resolvedRoots.has(c.id),
+      replies: [],
+    });
+  }
+  for (const c of comments) {
+    if (!c.in_reply_to_id || isBot(c)) continue;
+    roots.get(c.in_reply_to_id)?.replies.push({
+      author: c.user?.login ?? "unknown",
+      body: c.body,
+    });
+  }
+  return [...roots.values()];
 }

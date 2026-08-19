@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 import {
-  fetchPreviousAiComments,
+  fetchPreviousThreads,
   gatherPr,
   type Octokit,
   type PrRef,
@@ -17,7 +17,12 @@ import {
   loadBasePrompt,
   loadDefaultRules,
 } from "./prompts.js";
-import { dedupeAgainstPrevious, planReview, submitReview } from "./review.js";
+import {
+  dedupeAgainstPrevious,
+  planReview,
+  submitReview,
+  threadStatus,
+} from "./review.js";
 import { loadRules } from "./rules.js";
 import { reviewOutputSchema, type Severity, severities } from "./schema.js";
 import { verifyFindings } from "./verify.js";
@@ -190,10 +195,17 @@ export async function run(): Promise<void> {
   try {
     const pr = await gatherPr(octokit, ref);
     const rules = loadRules(workspace, pr.changedPaths);
-    const previous = await fetchPreviousAiComments(octokit, ref, [
-      inputs.reviewerLogin,
-      "github-actions[bot]",
+    const previous = await fetchPreviousThreads(octokit, ref, [
+      inputs.reviewerLogin || "github-actions[bot]",
     ]);
+    if (previous.length > 0) {
+      const open = previous.filter(
+        (t) => threadStatus(t, inputs.requestChangesThreshold) === "open",
+      ).length;
+      core.info(
+        `Earlier review threads: ${previous.length} fetched (${open} open, ${previous.length - open} closed)`,
+      );
+    }
     const linkedIssues = await fetchLinkedIssues(
       octokit,
       parseIssueRefs(pr.meta.body, ref.owner, ref.repo),
@@ -227,6 +239,7 @@ export async function run(): Promise<void> {
         files: pr.files,
         skippedFiles: pr.skippedFiles,
         previous,
+        requestChangesThreshold: inputs.requestChangesThreshold,
         linkedIssues,
         referencedWorkflows,
       }),
@@ -242,7 +255,16 @@ export async function run(): Promise<void> {
 
     core.info(`Phase 1 tokens: ${describeUsage(phase1.usage)}`);
 
-    const fresh = dedupeAgainstPrevious(phase1.output.findings, previous);
+    const { fresh, sameLine } = dedupeAgainstPrevious(
+      phase1.output.findings,
+      previous,
+      inputs.requestChangesThreshold,
+    );
+    for (const f of sameLine) {
+      core.info(
+        `Dropped, a closed thread sits at this line: ${f.path}:${f.line} ${f.comment}`,
+      );
+    }
     core.info(`Phase 2: verifying ${fresh.length} findings`);
     const phase2 = await verifyFindings({
       modelId: inputs.model,
