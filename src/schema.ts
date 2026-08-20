@@ -47,7 +47,11 @@ export const verificationSchema = z.object({
   evidence: z
     .string()
     .describe("Concrete code evidence, or the reason for discarding"),
-  verdict: z.enum(["confirmed", "discarded"]),
+  verdict: z
+    .enum(["confirmed", "discarded", "duplicate"])
+    .describe(
+      "duplicate: restates a thread marked [closed] in the prompt; a match with an [open] thread is confirmed or discarded like any other finding",
+    ),
   severity: z
     .enum(severities)
     .optional()

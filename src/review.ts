@@ -90,14 +90,20 @@ function renderBodyLine(f: Finding): string {
   return `- \`${f.path}:${f.line}\` (${f.severity}, ${f.ruleRef}) ${f.comment}`;
 }
 
-/** Closing body line: files covered and tool calls spent. */
+/** Closing body line: files covered, tool calls, repeats dropped. */
 function renderFootnote(
   reviewedFiles: number,
   totalFiles: number,
-  stats: { toolCalls: number },
+  stats: { toolCalls: number; duplicates: number },
 ): string {
   const files = `${reviewedFiles} of ${totalFiles} changed ${totalFiles === 1 ? "file" : "files"}`;
-  return `_Reviewed ${files} with ${stats.toolCalls} tool calls._`;
+  const repeats =
+    stats.duplicates === 0
+      ? ""
+      : stats.duplicates === 1
+        ? "; dropped 1 repeat of an earlier thread"
+        : `; dropped ${stats.duplicates} repeats of earlier threads`;
+  return `_Reviewed ${files} with ${stats.toolCalls} tool calls${repeats}._`;
 }
 
 /** Collapsed section listing what verification threw out, and why. */
@@ -130,7 +136,7 @@ export function planReview(
     inlineSeverityThreshold: Severity;
     requestChangesThreshold: Severity;
     skippedFiles: string[];
-    stats: { toolCalls: number };
+    stats: { toolCalls: number; duplicates: number };
     discarded: { finding: Finding; evidence: string }[];
   },
 ): ReviewPlan {
