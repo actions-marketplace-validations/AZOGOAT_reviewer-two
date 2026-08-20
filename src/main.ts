@@ -294,6 +294,11 @@ export async function run(): Promise<void> {
           `${d.finding.comment} (${d.evidence})`,
       );
     }
+    for (const f of phase2.unverified) {
+      core.warning(
+        `Verification failed on a re-review, not posted: ${f.path}:${f.line} ${f.comment}`,
+      );
+    }
     core.info(`Phase 2 tokens: ${describeUsage(phase2.usage)}`);
 
     const plan = planReview(
@@ -309,6 +314,7 @@ export async function run(): Promise<void> {
           duplicates: phase2.duplicates.length,
         },
         discarded: phase2.discarded,
+        unverified: phase2.unverified.length,
       },
     );
 

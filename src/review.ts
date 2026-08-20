@@ -138,6 +138,7 @@ export function planReview(
     skippedFiles: string[];
     stats: { toolCalls: number; duplicates: number };
     discarded: { finding: Finding; evidence: string }[];
+    unverified: number;
   },
 ): ReviewPlan {
   const anchorable = new Map(files.map((f) => [f.path, f.commentableLines]));
@@ -179,6 +180,12 @@ export function planReview(
   if (opts.skippedFiles.length > 0) {
     bodyParts.push(
       `Note: these files were too large to include in the review context and were only explored on demand: ${opts.skippedFiles.map((f) => `\`${f}\``).join(", ")}.`,
+    );
+  }
+  if (opts.unverified > 0) {
+    const n = opts.unverified;
+    bodyParts.push(
+      `Note: ${n} ${n === 1 ? "finding" : "findings"} could not be checked because the verification call failed, so ${n === 1 ? "it is" : "they are"} left out of this review.`,
     );
   }
   bodyParts.push(

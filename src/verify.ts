@@ -16,9 +16,9 @@ const MAX_VERIFIED_FINDINGS = 20;
  * Phase 2: re-examines each candidate finding with fresh tool access and keeps
  * the ones the model confirms with concrete evidence. Verifies at most
  * MAX_VERIFIED_FINDINGS, most severe first; the overflow is counted in skipped.
- * Findings that restate an earlier thread come back in duplicates. On a call
- * failure the finding is kept; verification filters noise, it must not lose
- * findings. discarded and duplicates carry the model's evidence for the log.
+ * Findings that restate an earlier thread come back in duplicates. A failed
+ * call keeps the finding on a first review and returns it in unverified on a
+ * re-review. discarded and duplicates carry the model's evidence for the log.
  */
 export async function verifyFindings(opts: {
   modelId: string;
@@ -32,12 +32,14 @@ export async function verifyFindings(opts: {
   findings: Finding[];
   discarded: { finding: Finding; evidence: string }[];
   duplicates: { finding: Finding; evidence: string }[];
+  unverified: Finding[];
   usage: UsageBreakdown;
   skipped: number;
 }> {
   const confirmed: Finding[] = [];
   const discarded: { finding: Finding; evidence: string }[] = [];
   const duplicates: { finding: Finding; evidence: string }[] = [];
+  const unverified: Finding[] = [];
   let usage: UsageBreakdown = {
     noCache: 0,
     cacheRead: 0,
@@ -77,13 +79,15 @@ export async function verifyFindings(opts: {
         discarded.push({ finding, evidence: output.evidence });
       }
     } catch {
-      confirmed.push(finding);
+      if (reReview) unverified.push(finding);
+      else confirmed.push(finding);
     }
   }
   return {
     findings: confirmed,
     discarded,
     duplicates,
+    unverified,
     usage,
     skipped: opts.findings.length - selected.length,
   };

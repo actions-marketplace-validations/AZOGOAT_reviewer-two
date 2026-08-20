@@ -48588,6 +48588,12 @@ function planReview(output, files, opts) {
       `Note: these files were too large to include in the review context and were only explored on demand: ${opts.skippedFiles.map((f) => `\`${f}\``).join(", ")}.`
     );
   }
+  if (opts.unverified > 0) {
+    const n = opts.unverified;
+    bodyParts.push(
+      `Note: ${n} ${n === 1 ? "finding" : "findings"} could not be checked because the verification call failed, so ${n === 1 ? "it is" : "they are"} left out of this review.`
+    );
+  }
   bodyParts.push(
     renderFootnote(
       files.length,
@@ -85657,6 +85663,7 @@ async function verifyFindings(opts) {
   const confirmed = [];
   const discarded = [];
   const duplicates = [];
+  const unverified = [];
   let usage = {
     noCache: 0,
     cacheRead: 0,
@@ -85694,13 +85701,15 @@ async function verifyFindings(opts) {
         discarded.push({ finding, evidence: output.evidence });
       }
     } catch {
-      confirmed.push(finding);
+      if (reReview) unverified.push(finding);
+      else confirmed.push(finding);
     }
   }
   return {
     findings: confirmed,
     discarded,
     duplicates,
+    unverified,
     usage,
     skipped: opts.findings.length - selected.length
   };
@@ -85957,6 +85966,11 @@ async function run() {
         `Repeat of an earlier thread: ${d.finding.path}:${d.finding.line} ${d.finding.comment} (${d.evidence})`
       );
     }
+    for (const f of phase2.unverified) {
+      warning(
+        `Verification failed on a re-review, not posted: ${f.path}:${f.line} ${f.comment}`
+      );
+    }
     info(`Phase 2 tokens: ${describeUsage(phase2.usage)}`);
     const plan = planReview(
       { summary: phase1.output.summary, findings: confirmed },
@@ -85970,7 +85984,8 @@ async function run() {
           toolCalls: phase1.toolCalls,
           duplicates: phase2.duplicates.length
         },
-        discarded: phase2.discarded
+        discarded: phase2.discarded,
+        unverified: phase2.unverified.length
       }
     );
     if (inputs.dryRun) {
