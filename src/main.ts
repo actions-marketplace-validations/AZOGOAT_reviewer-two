@@ -294,6 +294,11 @@ export async function run(): Promise<void> {
           `${d.finding.comment} (${d.evidence})`,
       );
     }
+    for (const f of phase2.droppedSuggestions) {
+      core.info(
+        `Suggestion dropped, not confirmed as replacement code: ${f.path}:${f.line} ${f.suggestion}`,
+      );
+    }
     for (const f of phase2.unverified) {
       core.warning(
         `Verification failed on a re-review, not posted: ${f.path}:${f.line} ${f.comment}`,

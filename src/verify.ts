@@ -19,6 +19,8 @@ const MAX_VERIFIED_FINDINGS = 20;
  * Findings that restate an earlier thread come back in duplicates. A failed
  * call keeps the finding on a first review and returns it in unverified on a
  * re-review. discarded and duplicates carry the model's evidence for the log.
+ * A suggestion block survives only when the model rules keep on it: the finding
+ * keeps its comment either way and comes back in droppedSuggestions for the log.
  */
 export async function verifyFindings(opts: {
   modelId: string;
@@ -33,6 +35,7 @@ export async function verifyFindings(opts: {
   discarded: { finding: Finding; evidence: string }[];
   duplicates: { finding: Finding; evidence: string }[];
   unverified: Finding[];
+  droppedSuggestions: Finding[];
   usage: UsageBreakdown;
   skipped: number;
 }> {
@@ -40,6 +43,7 @@ export async function verifyFindings(opts: {
   const discarded: { finding: Finding; evidence: string }[] = [];
   const duplicates: { finding: Finding; evidence: string }[] = [];
   const unverified: Finding[] = [];
+  const droppedSuggestions: Finding[] = [];
   let usage: UsageBreakdown = {
     noCache: 0,
     cacheRead: 0,
@@ -69,9 +73,12 @@ export async function verifyFindings(opts: {
       });
       usage = addUsage(usage, callUsage);
       if (output.verdict === "confirmed") {
+        const keeps = output.suggestion === "keep";
+        if (finding.suggestion && !keeps) droppedSuggestions.push(finding);
         confirmed.push({
           ...finding,
           severity: output.severity ?? finding.severity,
+          suggestion: keeps ? finding.suggestion : undefined,
         });
       } else if (output.verdict === "duplicate" && reReview) {
         duplicates.push({ finding, evidence: output.evidence });
@@ -79,8 +86,12 @@ export async function verifyFindings(opts: {
         discarded.push({ finding, evidence: output.evidence });
       }
     } catch {
-      if (reReview) unverified.push(finding);
-      else confirmed.push(finding);
+      if (reReview) {
+        unverified.push(finding);
+      } else {
+        if (finding.suggestion) droppedSuggestions.push(finding);
+        confirmed.push({ ...finding, suggestion: undefined });
+      }
     }
   }
   return {
@@ -88,6 +99,7 @@ export async function verifyFindings(opts: {
     discarded,
     duplicates,
     unverified,
+    droppedSuggestions,
     usage,
     skipped: opts.findings.length - selected.length,
   };

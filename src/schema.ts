@@ -34,7 +34,7 @@ export const reviewOutputSchema = z.object({
   summary: z
     .string()
     .describe(
-      "One or two sentence verdict; never a description of the change itself",
+      "One or two sentence verdict; never describe the change itself, never count the findings or name their severities, never mention earlier rounds",
     ),
   findings: z.array(findingSchema),
 });
@@ -57,5 +57,10 @@ export const verificationSchema = z.object({
     .optional()
     .describe(
       "Corrected severity when the evidence shows the impact differs from what was stated",
+    ),
+  suggestion: z
+    .enum(["keep", "drop", "none"])
+    .describe(
+      "Ruling on the finding's suggestion block: keep when it is replacement code for the flagged lines, drop when it is not, none when the finding carries no block",
     ),
 });

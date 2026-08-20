@@ -79,10 +79,15 @@ export interface ReviewPlan {
   comments: { path: string; line: number; side: "RIGHT"; body: string }[];
 }
 
+/** Blank or fenced text cannot render as a suggestion block, so it is dropped. */
+function usableSuggestion(suggestion: string | undefined): string | undefined {
+  if (!suggestion || suggestion.trim() === "") return undefined;
+  return suggestion.includes("```") ? undefined : suggestion;
+}
+
 function renderFindingBody(f: Finding): string {
-  const suggestion = f.suggestion
-    ? `\n\n\`\`\`suggestion\n${f.suggestion}\n\`\`\``
-    : "";
+  const usable = usableSuggestion(f.suggestion);
+  const suggestion = usable ? `\n\n\`\`\`suggestion\n${usable}\n\`\`\`` : "";
   return `${f.comment}\n\n_${f.severity} | ${f.ruleRef}_${suggestion}`;
 }
 
