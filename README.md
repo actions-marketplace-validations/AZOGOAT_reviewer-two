@@ -92,7 +92,7 @@ jobs:
       anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-Requesting a review from that account triggers a run under its identity. Re-requesting runs an incremental pass that only raises new or unresolved issues. Draft PRs are skipped.
+Requesting a review from that account triggers a run under its identity. Re-requesting runs an incremental pass: it reads its earlier inline threads, replies included. Anything someone replied to or resolved, or that would not block the merge, is never brought up again; an unanswered blocking finding comes back only if the code still has the problem. Draft PRs are skipped.
 
 ## Rules and context
 
