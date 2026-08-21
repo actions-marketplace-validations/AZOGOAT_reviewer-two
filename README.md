@@ -96,7 +96,7 @@ Requesting a review from that account triggers a run under its identity. Re-requ
 
 ## Rules and context
 
-Zero config works: README.md, AGENTS.md, CLAUDE.md, CONTRIBUTING.md, and .cursor/rules are picked up automatically. Issues referenced in the PR description (`#123`, `owner/repo#123`, or full URLs) are fetched with their comment threads; refs the token cannot read are skipped.
+Zero config works: README.md, AGENTS.md (at the root or under .kimi-code/), CLAUDE.md, CONTRIBUTING.md, .cursor/rules, and agent skills in .agents/skills/ or .kimi-code/skills/ (each skill's SKILL.md, or a flat .md file) are picked up automatically. Issues referenced in the PR description (`#123`, `owner/repo#123`, or full URLs) are fetched with their comment threads; refs the token cannot read are skipped.
 
 For per-path rules, add `.github/ai-review/manifest.yml`:
 

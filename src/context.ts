@@ -109,27 +109,55 @@ export function parseDiff(diff: string): FileDiff[] {
   }
   return files.map((f) => ({
     ...f,
-    // drop the trailing newline; an empty tail would count as a context line
-    commentableLines: commentableLinesFromPatch(f.patch.replace(/\n$/, "")),
+    commentableLines: commentableLinesFromPatch(f.patch),
   }));
 }
 
-/** New-side commentable lines for one file's standalone hunk patch (no file headers). */
-function commentableLinesFromPatch(patch: string): Set<number> {
-  const commentable = new Set<number>();
+/**
+ * New-side lines of one file's standalone hunk patch (no file headers), keyed
+ * by line number. These are the lines GitHub can anchor an inline comment to.
+ */
+export function newSideLines(patch: string): Map<number, string> {
+  const lines = new Map<number, string>();
   let newLine = 0;
-  for (const line of patch.split("\n")) {
+  for (const line of patch.replace(/\n$/, "").split("\n")) {
     if (line.startsWith("@@")) {
       const m = /\+(\d+)/.exec(line);
       newLine = m ? Number(m[1]) : 0;
       continue;
     }
     if (line.startsWith("+") || line.startsWith(" ") || line === "") {
-      if (newLine > 0) commentable.add(newLine);
+      if (newLine > 0) lines.set(newLine, line.slice(1));
       newLine++;
     }
   }
-  return commentable;
+  return lines;
+}
+
+/** New-side commentable line numbers of one file's hunk patch. */
+function commentableLinesFromPatch(patch: string): Set<number> {
+  return new Set(newSideLines(patch).keys());
+}
+
+/**
+ * New-side text of lines start..end from one file's hunk patch. Returns null
+ * unless the range is well formed and every line of it is present in the
+ * patch, so callers can show the exact code a finding flags.
+ */
+export function patchLineText(
+  patch: string,
+  start: number,
+  end: number,
+): string | null {
+  if (start > end) return null;
+  const text = newSideLines(patch);
+  const lines: string[] = [];
+  for (let n = start; n <= end; n++) {
+    const t = text.get(n);
+    if (t === undefined) return null;
+    lines.push(t);
+  }
+  return lines.join("\n");
 }
 
 /**
@@ -316,11 +344,14 @@ export async function fetchPreviousThreads(
     fetchResolvedRootIds(octokit, ref),
   ]);
   const logins = new Set(botLogins);
-  const isBot = (c: { user: { login: string } | null }) =>
+  const isSelf = (c: { user: { login: string } | null }) =>
     c.user !== null && logins.has(c.user.login);
+  const isHuman = (c: { user: { login: string; type: string } | null }) =>
+    !isSelf(c) && c.user?.type !== "Bot";
   const roots = new Map<number, PreviousThread>();
   for (const c of comments) {
-    if (c.in_reply_to_id || !isBot(c) || !parseFindingTrailer(c.body)) continue;
+    if (c.in_reply_to_id || !isSelf(c) || !parseFindingTrailer(c.body))
+      continue;
     roots.set(c.id, {
       path: c.path,
       line: c.line ?? null,
@@ -331,7 +362,7 @@ export async function fetchPreviousThreads(
     });
   }
   for (const c of comments) {
-    if (!c.in_reply_to_id || isBot(c)) continue;
+    if (!c.in_reply_to_id || !isHuman(c)) continue;
     roots.get(c.in_reply_to_id)?.replies.push({
       author: c.user?.login ?? "unknown",
       body: c.body,

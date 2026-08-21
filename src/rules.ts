@@ -27,15 +27,25 @@ const manifestSchema = z.object({
 const FALLBACK_FILES = [
   "README.md",
   "AGENTS.md",
+  ".kimi-code/AGENTS.md",
   "CLAUDE.md",
   "CONTRIBUTING.md",
 ];
+
+/** Agent skill folders: one SKILL.md per skill directory, or a flat .md file per skill. */
+const SKILL_DIRS = [".agents/skills", ".kimi-code/skills"];
 
 /** Reads a file if it exists and is a regular file, otherwise undefined. */
 function readIfExists(path: string): string | undefined {
   if (!existsSync(path)) return undefined;
   const stats = statSync(path);
   return stats.isFile() ? readFileSync(path, "utf8") : undefined;
+}
+
+/** Sorted entries of a directory, empty when it does not exist or is a file. */
+function listDir(path: string): string[] {
+  if (!existsSync(path) || !statSync(path).isDirectory()) return [];
+  return readdirSync(path).sort();
 }
 
 /**
@@ -106,6 +116,19 @@ function loadFallback(repoRoot: string): LoadedRules {
         name: ".cursor/rules",
         content: readFileSync(cursorRules, "utf8"),
       });
+    }
+  }
+  for (const dir of SKILL_DIRS) {
+    for (const entry of listDir(join(repoRoot, dir))) {
+      const skillPath = join(repoRoot, dir, entry);
+      const name = statSync(skillPath).isDirectory()
+        ? `${dir}/${entry}/SKILL.md`
+        : entry.endsWith(".md")
+          ? `${dir}/${entry}`
+          : undefined;
+      if (name === undefined) continue;
+      const content = readIfExists(join(repoRoot, name));
+      if (content !== undefined) ruleFiles.push({ name, content });
     }
   }
   return { ruleFiles, source: "fallback" };
