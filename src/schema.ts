@@ -10,7 +10,17 @@ export const findingSchema = z.object({
     .number()
     .int()
     .positive()
-    .describe("Line number in the new version of the file"),
+    .describe(
+      "Line number in the new version of the file; for a multi-line finding, the last line of the flagged range",
+    ),
+  startLine: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      "First line of the flagged range when it spans more than one line; must be above line and inside the diff. Omit for a single-line finding",
+    ),
   severity: z.enum(severities),
   comment: z
     .string()
@@ -20,7 +30,7 @@ export const findingSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Replacement code for the commented line(s), only when the fix is obvious",
+      "Code that replaces the flagged range exactly (startLine through line, or the single line), committed verbatim when the author applies it",
     ),
   ruleRef: z
     .string()
@@ -50,7 +60,15 @@ export const verificationSchema = z.object({
   verdict: z
     .enum(["confirmed", "discarded", "duplicate"])
     .describe(
-      "duplicate: restates a thread marked [closed] in the prompt; a match with an [open] thread is confirmed or discarded like any other finding",
+      "duplicate: restates the numbered thread named in duplicateOf and that thread is marked [closed]; a match with an [open] thread is confirmed or discarded like any other finding",
+    ),
+  duplicateOf: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      "Number of the earlier thread the finding restates, as shown in its header; required with the duplicate verdict",
     ),
   severity: z
     .enum(severities)
