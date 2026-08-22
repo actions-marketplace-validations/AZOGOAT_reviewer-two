@@ -17,14 +17,15 @@ import {
   loadBasePrompt,
   loadDefaultRules,
 } from "./prompts.js";
-import {
-  dedupeAgainstPrevious,
-  planReview,
-  submitReview,
-  threadStatus,
-} from "./review.js";
+import { planReview, submitReview, threadStatus } from "./review.js";
 import { loadRules } from "./rules.js";
-import { reviewOutputSchema, type Severity, severities } from "./schema.js";
+import {
+  type Finding,
+  reviewOutputSchema,
+  type Severity,
+  severities,
+} from "./schema.js";
+import { fitSuggestion } from "./suggestions.js";
 import { verifyFindings } from "./verify.js";
 import { fetchReferencedWorkflows, parseWorkflowRefs } from "./workflows.js";
 
@@ -155,7 +156,7 @@ async function postFailureComment(octokit: Octokit, ref: PrRef): Promise<void> {
   });
 }
 
-/** Full pipeline: guard, gather, phase 1, dedupe, phase 2, compose, submit. */
+/** Full pipeline: guard, gather, phase 1, phase 2, compose, submit. */
 export async function run(): Promise<void> {
   const inputs = readInputs();
   exportApiKeys();
@@ -195,9 +196,11 @@ export async function run(): Promise<void> {
   try {
     const pr = await gatherPr(octokit, ref);
     const rules = loadRules(workspace, pr.changedPaths);
-    const previous = await fetchPreviousThreads(octokit, ref, [
-      inputs.reviewerLogin || "github-actions[bot]",
-    ]);
+    const previous = await fetchPreviousThreads(
+      octokit,
+      ref,
+      [inputs.reviewerLogin, "github-actions[bot]"].filter(Boolean),
+    );
     if (previous.length > 0) {
       const open = previous.filter(
         (t) => threadStatus(t, inputs.requestChangesThreshold) === "open",
@@ -255,25 +258,40 @@ export async function run(): Promise<void> {
 
     core.info(`Phase 1 tokens: ${describeUsage(phase1.usage)}`);
 
-    const { fresh, sameLine } = dedupeAgainstPrevious(
-      phase1.output.findings,
-      previous,
-      inputs.requestChangesThreshold,
-    );
-    for (const f of sameLine) {
-      core.info(
-        `Dropped, a closed thread sits at this line: ${f.path}:${f.line} ${f.comment}`,
-      );
-    }
-    core.info(`Phase 2: verifying ${fresh.length} findings`);
+    const patches = new Map(pr.files.map((f) => [f.path, f.patch]));
+    const findings = phase1.output.findings.map((f) => {
+      const fit = fitSuggestion(f, patches.get(f.path));
+      const range = (x: Finding) =>
+        x.startLine !== undefined && x.startLine !== x.line
+          ? `${x.startLine}-${x.line}`
+          : `${x.line}`;
+      if (fit.snapped) {
+        core.info(
+          `Range ${range(f)} moved to ${range(fit.finding)}, the block's edges match those lines: ${f.path}`,
+        );
+      }
+      if (fit.dropped) {
+        core.info(
+          `Suggestion dropped, it only repeats the code it would replace: ${f.path}:${f.line}`,
+        );
+      } else if (fit.trimmed > 0) {
+        core.info(
+          `Suggestion trimmed, ${fit.trimmed} line(s) repeated the code around the range: ${f.path}:${f.line}`,
+        );
+      }
+      return fit.finding;
+    });
+
+    core.info(`Phase 2: verifying ${findings.length} findings`);
     const phase2 = await verifyFindings({
       modelId: inputs.model,
       system,
-      findings: fresh,
+      findings,
       previous,
       requestChangesThreshold: inputs.requestChangesThreshold,
       tools,
       contextWindowTokens: inputs.contextWindowTokens,
+      files: pr.files,
     });
     const confirmed = phase2.findings;
     if (phase2.skipped > 0) {
@@ -322,6 +340,12 @@ export async function run(): Promise<void> {
         unverified: phase2.unverified.length,
       },
     );
+    for (const f of plan.droppedRanges) {
+      core.info(
+        `Range ${f.startLine}-${f.line} is not fully in the diff, anchored to line ${f.line} only` +
+          `${f.suggestion ? " and the suggestion dropped" : ""}: ${f.path}`,
+      );
+    }
 
     if (inputs.dryRun) {
       core.info(
@@ -329,7 +353,7 @@ export async function run(): Promise<void> {
       );
       return;
     }
-    await submitReview(octokit, ref, plan);
+    await submitReview(octokit, ref, plan, pr.meta.headSha);
     core.info(
       `Review submitted: ${plan.event}, ${plan.comments.length} inline comments`,
     );

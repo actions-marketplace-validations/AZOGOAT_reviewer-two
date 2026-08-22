@@ -29,9 +29,14 @@ const TRAILER = new RegExp(`^_(${severities.join("|")}) \\| (.+)_$`, "gm");
 export function parseFindingTrailer(
   body: string,
 ): { severity: Severity; ruleRef: string } | null {
-  const last = [...body.matchAll(TRAILER)].at(-1);
+  const last = [...stripSuggestionBlock(body).matchAll(TRAILER)].at(-1);
   if (!last) return null;
   return { severity: last[1] as Severity, ruleRef: last[2] as string };
+}
+
+/** Removes the suggestion block renderFindingBody appends, leaving the comment and trailer. */
+export function stripSuggestionBlock(body: string): string {
+  return body.replace(/\n*^`{3,}suggestion\n[\s\S]*$/m, "");
 }
 
 export type ThreadStatus = "open" | "closed";
@@ -49,45 +54,29 @@ export function threadStatus(
     : "closed";
 }
 
-/** Splits findings on whether a closed earlier thread sits at their path and line. */
-export function dedupeAgainstPrevious(
-  findings: Finding[],
-  previous: PreviousThread[],
-  requestChangesThreshold: Severity,
-): { fresh: Finding[]; sameLine: Finding[] } {
-  const seen = new Set(
-    previous
-      .filter(
-        (p) =>
-          p.line !== null &&
-          threadStatus(p, requestChangesThreshold) === "closed",
-      )
-      .map((p) => `${p.path}:${p.line}`),
-  );
-  const fresh: Finding[] = [];
-  const sameLine: Finding[] = [];
-  for (const f of findings) {
-    if (seen.has(`${f.path}:${f.line}`)) sameLine.push(f);
-    else fresh.push(f);
-  }
-  return { fresh, sameLine };
-}
-
 export interface ReviewPlan {
   event: "COMMENT" | "REQUEST_CHANGES";
   body: string;
-  comments: { path: string; line: number; side: "RIGHT"; body: string }[];
-}
-
-/** Blank or fenced text cannot render as a suggestion block, so it is dropped. */
-function usableSuggestion(suggestion: string | undefined): string | undefined {
-  if (!suggestion || suggestion.trim() === "") return undefined;
-  return suggestion.includes("```") ? undefined : suggestion;
+  comments: {
+    path: string;
+    line: number;
+    side: "RIGHT";
+    start_line?: number;
+    start_side?: "RIGHT";
+    body: string;
+  }[];
+  /** Findings whose declared range could not be anchored, posted on their last line only. */
+  droppedRanges: Finding[];
 }
 
 function renderFindingBody(f: Finding): string {
-  const usable = usableSuggestion(f.suggestion);
-  const suggestion = usable ? `\n\n\`\`\`suggestion\n${usable}\n\`\`\`` : "";
+  const usable = f.suggestion?.trim() ? f.suggestion : undefined;
+  // the outer fence must be longer than any backtick run inside the block
+  let fence = "```";
+  while (usable?.includes(fence)) fence += "`";
+  const suggestion = usable
+    ? `\n\n${fence}suggestion\n${usable}\n${fence}`
+    : "";
   return `${f.comment}\n\n_${f.severity} | ${f.ruleRef}_${suggestion}`;
 }
 
@@ -207,28 +196,63 @@ export function planReview(
     ? ("REQUEST_CHANGES" as const)
     : ("COMMENT" as const);
 
-  return {
-    event,
-    body: bodyParts.join("\n\n"),
-    comments: inline.map((f) => ({
+  const rangeStart = (f: Finding): number | undefined =>
+    f.startLine === f.line ? undefined : f.startLine;
+  const rangeUsable = (f: Finding): boolean => {
+    const start = rangeStart(f);
+    if (start === undefined) return true;
+    if (start > f.line) return false;
+    const lines = anchorable.get(f.path);
+    if (!lines) return false;
+    for (let n = start; n <= f.line; n++) {
+      if (!lines.has(n)) return false;
+    }
+    return true;
+  };
+
+  const droppedRanges: Finding[] = [];
+  const comments = inline.map((f) => {
+    const usable = rangeUsable(f);
+    if (!usable) droppedRanges.push(f);
+    const start = rangeStart(f);
+    const range =
+      usable && start !== undefined
+        ? { start_line: start, start_side: "RIGHT" as const }
+        : {};
+    return {
       path: f.path,
       line: f.line,
       side: "RIGHT" as const,
-      body: renderFindingBody(f),
-    })),
+      ...range,
+      body: renderFindingBody(usable ? f : { ...f, suggestion: undefined }),
+    };
+  });
+
+  return {
+    event,
+    body: bodyParts.join("\n\n"),
+    comments,
+    droppedRanges,
   };
 }
 
-/** Submits the review. Aside from main.ts's failure comment, pulls.createReview is the only write this tool performs. */
+/**
+ * Submits the review, pinned to the head that was gathered so comments anchor
+ * to the code that was actually reviewed even if the branch moved meanwhile.
+ * Aside from main.ts's failure comment, pulls.createReview is the only write
+ * this tool performs.
+ */
 export async function submitReview(
   octokit: Octokit,
   ref: PrRef,
   plan: ReviewPlan,
+  headSha: string,
 ): Promise<void> {
   await octokit.rest.pulls.createReview({
     owner: ref.owner,
     repo: ref.repo,
     pull_number: ref.pullNumber,
+    commit_id: headSha,
     event: plan.event,
     body: plan.body,
     comments: plan.comments,
